@@ -69,6 +69,22 @@ import android.provider.Settings
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarData
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarDefaults
+import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Close
+import android.content.Context
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -103,9 +119,24 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("InlinedApi")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Запрос разрешения на уведомления для Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permission = android.Manifest.permission.POST_NOTIFICATIONS
+            val granted = ContextCompat.checkSelfPermission(this, permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                ActivityCompat.requestPermissions(this, arrayOf(permission), 2001)
+            }
+        }
+        // Запуск фоновой проверки обновлений
+        com.example.reyohoho.ui.scheduleUpdateCheckWorker(this)
         
         // Проверяем и запрашиваем разрешения
         checkAndRequestPermissions()
+        
+        val openAbout = intent.getBooleanExtra("open_about", false)
+        if (openAbout) {
+            startUpdateDownload(this)
+        }
         
         try {
             // Инициализация менеджера настроек
@@ -187,6 +218,8 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    val appVersion = "3.11"
+
                     Box(modifier = Modifier.fillMaxSize()) {
                         // Если необходимо выбрать тип устройства при первом запуске
                         if (showDeviceTypeSelection) {
@@ -231,7 +264,8 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                     SettingsScreen(
                                         settingsManager = settingsManager,
-                                        onClose = { showSettings = false }
+                                        onClose = { showSettings = false },
+                                        appVersion = appVersion
                                     )
                                 }
                             }
@@ -263,29 +297,6 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 }
-                            }
-                        }
-                    }
-                    
-                    // Обработка кнопки "Назад"
-                    BackHandler {
-                        if (showSettings) {
-                            showSettings = false
-                        } else if (showTVCursorPrompt) {
-                            showTVCursorPrompt = false
-                        } else if (showDeviceTypeSelection) {
-                            // Не позволяем выйти из выбора типа устройства
-                        } else {
-                            // Двойное нажатие для выхода из приложения
-                            if (doubleBackToExitPressedOnce) {
-                                finish()
-                            } else {
-                                doubleBackToExitPressedOnce = true
-                                Toast.makeText(this@MainActivity, "Нажмите еще раз для выхода", Toast.LENGTH_SHORT).show()
-                                
-                                Handler(Looper.getMainLooper()).postDelayed({
-                                    doubleBackToExitPressedOnce = false
-                                }, 2000)
                             }
                         }
                     }
@@ -502,6 +513,19 @@ class MainActivity : ComponentActivity() {
         }
         
         super.onDestroy()
+    }
+
+    private fun startUpdateDownload(context: Context) {
+        lifecycleScope.launch {
+            try {
+                val result = com.example.reyohoho.ui.UpdateChecker.checkForUpdate()
+                if (result.isUpdateAvailable) {
+                    com.example.reyohoho.ui.UpdateChecker.downloadAndInstallApk(context, result.downloadUrl, result.latestVersion, autoInstall = true)
+                }
+            } catch (e: Exception) {
+                // No logging needed here
+            }
+        }
     }
 }
 

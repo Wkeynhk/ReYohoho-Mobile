@@ -12,4 +12,5 @@
     <cache-path
         name="cache"
         path="." />
+    <external-path name="reyohoho" path="Download/ReYohoho/" />
 </paths> 

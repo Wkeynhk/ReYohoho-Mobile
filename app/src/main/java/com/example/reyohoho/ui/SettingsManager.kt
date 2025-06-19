@@ -19,6 +19,10 @@ class SettingsManager(context: Context) {
         private const val KEY_SITE_MIRROR = "site_mirror"
         private const val KEY_PULL_TO_REFRESH = "pull_to_refresh"
         private const val KEY_DISABLE_ZOOM = "disable_zoom"
+        private const val KEY_NOTIFY_ON_UPDATE = "notify_on_update"
+        private const val KEY_DOWNLOADED_UPDATE_VERSION = "downloaded_update_version"
+        private const val KEY_DOWNLOADED_UPDATE_ID = "downloaded_update_id"
+        private const val KEY_IGNORED_UPDATE_VERSION = "ignored_update_version"
         const val DEVICE_TYPE_ANDROID = "android"
         const val DEVICE_TYPE_ANDROID_TV = "android_tv"
 
@@ -224,5 +228,40 @@ class SettingsManager(context: Context) {
     fun refreshPage() {
         // Логируем обновление страницы
         android.util.Log.d("SettingsManager", "Запрошено обновление страницы")
+    }
+
+    fun isNotifyOnUpdateEnabled(): Boolean {
+        return prefs.getBoolean(KEY_NOTIFY_ON_UPDATE, true)
+    }
+
+    fun setNotifyOnUpdate(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_NOTIFY_ON_UPDATE, enabled).apply()
+    }
+
+    fun setDownloadedUpdate(version: String, downloadId: Long) {
+        prefs.edit()
+            .putString(KEY_DOWNLOADED_UPDATE_VERSION, version)
+            .putLong(KEY_DOWNLOADED_UPDATE_ID, downloadId)
+            .apply()
+    }
+
+    fun getDownloadedUpdateVersion(): String? = prefs.getString(KEY_DOWNLOADED_UPDATE_VERSION, null)
+    fun getDownloadedUpdateId(): Long = prefs.getLong(KEY_DOWNLOADED_UPDATE_ID, -1L)
+
+    fun clearDownloadedUpdate() {
+        prefs.edit()
+            .remove(KEY_DOWNLOADED_UPDATE_VERSION)
+            .remove(KEY_DOWNLOADED_UPDATE_ID)
+            .apply()
+    }
+
+    fun setIgnoredUpdate(version: String) {
+        prefs.edit().putString(KEY_IGNORED_UPDATE_VERSION, version).apply()
+    }
+
+    fun getIgnoredUpdateVersion(): String? = prefs.getString(KEY_IGNORED_UPDATE_VERSION, null)
+
+    fun clearIgnoredUpdate() {
+        prefs.edit().remove(KEY_IGNORED_UPDATE_VERSION).apply()
     }
 } 

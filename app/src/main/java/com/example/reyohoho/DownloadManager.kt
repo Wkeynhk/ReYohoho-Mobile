@@ -159,11 +159,8 @@ class AppDownloadManager private constructor(private val context: Context) {
             updatedDownloads[downloadId] = downloadInfo
             _activeDownloads.value = updatedDownloads
             
-            Log.d(TAG, "Начата загрузка: $fileName, ID: $downloadId")
-            
             return downloadId
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка при запуске загрузки: ${e.message}")
             return -1L
         }
     }
@@ -192,10 +189,7 @@ class AppDownloadManager private constructor(private val context: Context) {
                 // Сохраняем историю
                 saveDownloadHistory()
             }
-            
-            Log.d(TAG, "Загрузка отменена: $downloadId")
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка при отмене загрузки: ${e.message}")
         }
     }
     
@@ -252,7 +246,6 @@ class AppDownloadManager private constructor(private val context: Context) {
             
             cursor.close()
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка при обновлении прогресса: ${e.message}")
         }
     }
     
@@ -278,8 +271,6 @@ class AppDownloadManager private constructor(private val context: Context) {
         
         // Сохраняем историю
         saveDownloadHistory()
-        
-        Log.d(TAG, "Загрузка завершена: ${download.fileName}, статус: $status")
     }
     
     /**
@@ -308,7 +299,6 @@ class AppDownloadManager private constructor(private val context: Context) {
             
             editor.apply()
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка при сохранении истории загрузок: ${e.message}")
         }
     }
     
@@ -362,7 +352,6 @@ class AppDownloadManager private constructor(private val context: Context) {
             
             _downloadHistory.value = history.sortedByDescending { it.timestamp }
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка при загрузке истории: ${e.message}")
         }
     }
     
@@ -385,18 +374,17 @@ class AppDownloadManager private constructor(private val context: Context) {
             // Удаляем файл
             val file = File(downloadInfo.filePath)
             val fileDeleted = if (file.exists()) file.delete() else true
-            
+
             // Удаляем запись из истории
             val updatedHistory = _downloadHistory.value.toMutableList()
             updatedHistory.removeIf { it.id == downloadInfo.id }
             _downloadHistory.value = updatedHistory
-            
+
             // Сохраняем изменения
             saveDownloadHistory()
-            
+
             return fileDeleted
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка при удалении файла: ${e.message}")
             return false
         }
     }
@@ -428,7 +416,6 @@ class AppDownloadManager private constructor(private val context: Context) {
                 context.startActivity(intent)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Ошибка при открытии файла: ${e.message}")
         }
     }
     

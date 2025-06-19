@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.reyohoho"
         minSdk = 24
         targetSdk = 35
-        versionCode = 310
-        versionName = "3.1"
+        versionCode = 311
+        versionName = "3.11"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -56,6 +56,9 @@ dependencies {
     
     // OkHttp для перехвата запросов
     implementation("com.squareup.okhttp3:okhttp:4.11.0")
+    
+    // WorkManager для фоновых задач
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

@@ -42,6 +42,16 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material.icons.filled.Refresh
+import android.app.DownloadManager
+import kotlinx.coroutines.delay
+import android.content.pm.PackageInstaller
+import android.os.Build
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarData
+import androidx.compose.material3.SnackbarResult
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 /**
  * Экран настроек приложения
@@ -51,11 +61,11 @@ import androidx.compose.material.icons.filled.Refresh
 fun SettingsScreen(
     settingsManager: SettingsManager,
     onClose: () -> Unit,
+    appVersion: String,
     onRefreshPage: () -> Unit = {}
 ) {
-    // Состояние для текущего экрана настроек
     var currentScreen by remember { mutableStateOf("main") }
-    
+    val notifyOnUpdate = remember { mutableStateOf(settingsManager.isNotifyOnUpdateEnabled()) }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -76,6 +86,16 @@ fun SettingsScreen(
                 settingsManager = settingsManager,
                 onBackPressed = { currentScreen = "main" },
                 onClose = onClose
+            )
+            "about" -> AboutScreen(
+                onBackPressed = { currentScreen = "main" },
+                onClose = onClose,
+                notifyOnUpdate = notifyOnUpdate.value,
+                onNotifyOnUpdateChange = {
+                    notifyOnUpdate.value = it
+                    settingsManager.setNotifyOnUpdate(it)
+                },
+                appVersion = appVersion
             )
         }
     }
@@ -151,6 +171,14 @@ fun MainSettingsScreen(
                     title = "Внешний вид",
                     subtitle = "Настройка отображения",
                     onClick = { onNavigateTo("appearance") }
+                )
+                
+                // О приложении
+                SettingsItem(
+                    icon = Icons.Default.Info,
+                    title = "О приложении",
+                    subtitle = "Версия, автообновление, лицензия",
+                    onClick = { onNavigateTo("about") }
                 )
             }
         }
@@ -372,8 +400,9 @@ fun AppSettingsScreen(
             onCheckedChange = { settingsManager.toggleFullscreenMode() }
         )
         
+        val versionName = "1.0.0" // Замените на реальное значение
         Text(
-            text = "Версия приложения: 3.1",
+            text = "Версия приложения: $versionName",
             color = Color.Gray,
             modifier = Modifier
                 .fillMaxWidth()
@@ -516,18 +545,43 @@ fun AppearanceSettingsScreen(
 
 @Composable
 fun AboutScreen(
-    onBackPressed: () -> Unit
+    onBackPressed: () -> Unit,
+    onClose: () -> Unit = {},
+    notifyOnUpdate: Boolean,
+    onNotifyOnUpdateChange: (Boolean) -> Unit,
+    appVersion: String
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isChecking by remember { mutableStateOf(false) }
+    var updateAvailable by remember { mutableStateOf(false) }
+    var latestVersion by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
+    var showUpdateBanner by remember { mutableStateOf(false) }
+    var bannerDismissed by remember { mutableStateOf(false) }
+    var downloadInProgress by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableStateOf<Float?>(null) }
+    var downloadStatus by remember { mutableStateOf<Int?>(null) }
+    var downloadedFilePath by remember { mutableStateOf<String?>(null) }
+    var downloaded by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val settingsManager = SettingsManager.getInstance(context)
+    val savedDownloadedVersion = settingsManager.getDownloadedUpdateVersion()
+    val savedDownloadedId = settingsManager.getDownloadedUpdateId()
+    val ignoredUpdateVersion = settingsManager.getIgnoredUpdateVersion()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color(0xFF121212))
             .padding(16.dp)
     ) {
-        // Верхняя панель
+        // Верхняя панель (стрелка, заголовок, крестик)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 24.dp),
+                .padding(top = 36.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(
@@ -542,67 +596,245 @@ fun AboutScreen(
                     tint = Color.White
                 )
             }
-            
             Spacer(modifier = Modifier.width(16.dp))
-            
             Text(
                 text = "О приложении",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f)
             )
+            Spacer(modifier = Modifier.width(16.dp))
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
+                    tint = Color.White
+                )
+            }
         }
-        
+        // Иконка под заголовком
+        Icon(
+            imageVector = Icons.Default.Info,
+            contentDescription = null,
+            tint = Color(0xFF4CAF50),
+            modifier = Modifier
+                .size(100.dp)
+                .align(Alignment.CenterHorizontally)
+        )
+        // Контент по центру
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Иконка приложения
-            Icon(
-                imageVector = Icons.Default.Info,
-                contentDescription = null,
-                tint = Color(0xFF4CAF50),
-                modifier = Modifier.size(100.dp)
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Название приложения
             Text(
-                text = "ReYohoho",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-            
-            // Версия приложения
-            Text(
-                text = "Версия 3.03",
+                text = "Версия: $appVersion",
                 fontSize = 16.sp,
-                color = Color.Gray
-            )
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            // Описание
-            Text(
-                text = "Приложение ReYohoho представляет собой Android-приложение, которое интегрирует в себя веб-сайт ReYohoho с функцией блокировки рекламы.",
-                fontSize = 16.sp,
-                color = Color.White,
+                color = Color.Gray,
                 textAlign = TextAlign.Center
             )
-            
             Spacer(modifier = Modifier.height(24.dp))
-            
-            // Лицензия
-            Text(
-                text = "Лицензия: MIT",
-                fontSize = 14.sp,
-                color = Color.Gray
-            )
+            // Баннер о новой версии (компактный)
+            Button(
+                onClick = {
+                    if (savedDownloadedVersion == latestVersion && savedDownloadedId > 0) return@Button
+                    if (ignoredUpdateVersion == latestVersion) return@Button
+                    isChecking = true
+                    errorMessage = ""
+                    coroutineScope.launch {
+                        try {
+                            val result = UpdateChecker.checkForUpdate()
+                            isChecking = false
+                            if (result.isUpdateAvailable) {
+                                updateAvailable = true
+                                latestVersion = result.latestVersion
+                            } else {
+                                updateAvailable = false
+                                latestVersion = result.latestVersion
+                            }
+                        } catch (e: Exception) {
+                            isChecking = false
+                            errorMessage = e.message ?: "Ошибка при проверке обновления"
+                        }
+                    }
+                },
+                enabled = !isChecking && !downloadInProgress,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (isChecking) "Проверка..." else "Проверить обновление")
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            // ВОССТАНОВЛЕННЫЙ ПЕРЕКЛЮЧАТЕЛЬ
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Уведомлять о новой версии",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = notifyOnUpdate,
+                    onCheckedChange = onNotifyOnUpdateChange,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color(0xFF4CAF50),
+                        checkedTrackColor = Color(0x884CAF50),
+                        uncheckedThumbColor = Color.Gray,
+                        uncheckedTrackColor = Color(0x33FFFFFF)
+                    )
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            if (updateAvailable) {
+                if (savedDownloadedVersion == latestVersion && savedDownloadedId > 0) {
+                    // Кнопка 'Обновить' с прогресс-баром
+                    if (downloadInProgress) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            LinearProgressIndicator(progress = downloadProgress ?: 0f, modifier = Modifier.weight(1f))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(text = "${((downloadProgress ?: 0f) * 100).toInt()}%", color = Color.White, fontSize = 16.sp)
+                        }
+                    } else {
+                        FilledTonalButton(
+                            onClick = {
+                                downloadInProgress = true
+                                coroutineScope.launch {
+                                    try {
+                                        val result = UpdateChecker.checkForUpdate()
+                                        val downloadId = UpdateChecker.downloadApkOnly(context, result.downloadUrl, latestVersion)
+                                        settingsManager.setDownloadedUpdate(latestVersion, downloadId)
+                                        val dm = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+                                        for (i in 1..180) {
+                                            val query = android.app.DownloadManager.Query().setFilterById(downloadId)
+                                            val cursor = dm.query(query)
+                                            if (cursor.moveToFirst()) {
+                                                val status = cursor.getInt(cursor.getColumnIndex(android.app.DownloadManager.COLUMN_STATUS))
+                                                val bytesDownloaded = cursor.getLong(cursor.getColumnIndex(android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                                                val bytesTotal = cursor.getLong(cursor.getColumnIndex(android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                                                downloadStatus = status
+                                                downloadProgress = if (bytesTotal > 0) bytesDownloaded.toFloat() / bytesTotal else 0f
+                                                if (status == android.app.DownloadManager.STATUS_SUCCESSFUL) {
+                                                    cursor.close()
+                                                    downloadStatus = 8
+                                                    downloadProgress = 1f
+                                                    downloadedFilePath = downloadId.toString()
+                                                    downloaded = true
+                                                    settingsManager.setDownloadedUpdate(latestVersion, downloadId)
+                                                    // Автоматическая установка APK
+                                                    UpdateChecker.installDownloadedApk(context, downloadId)
+                                                    break
+                                                } else if (status == android.app.DownloadManager.STATUS_FAILED) {
+                                                    cursor.close()
+                                                    downloadStatus = 16
+                                                    break
+                                                }
+                                            }
+                                            cursor.close()
+                                            kotlinx.coroutines.delay(1000)
+                                        }
+                                        downloadInProgress = false
+                                    } catch (e: Exception) {
+                                        downloadInProgress = false
+                                        errorMessage = e.message ?: "Ошибка загрузки обновления"
+                                        downloadStatus = 16
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White)
+                        ) {
+                            Icon(imageVector = Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Обновить", fontSize = 18.sp)
+                        }
+                    }
+                } else {
+                    // Кнопка 'Загрузить обновление'
+                    FilledTonalButton(
+                        onClick = {
+                            downloadInProgress = true
+                            coroutineScope.launch {
+                                try {
+                                    val result = UpdateChecker.checkForUpdate()
+                                    val downloadId = UpdateChecker.downloadApkOnly(context, result.downloadUrl, latestVersion)
+                                    settingsManager.setDownloadedUpdate(latestVersion, downloadId)
+                                    val dm = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+                                    for (i in 1..180) {
+                                        val query = android.app.DownloadManager.Query().setFilterById(downloadId)
+                                        val cursor = dm.query(query)
+                                        if (cursor.moveToFirst()) {
+                                            val status = cursor.getInt(cursor.getColumnIndex(android.app.DownloadManager.COLUMN_STATUS))
+                                            val bytesDownloaded = cursor.getLong(cursor.getColumnIndex(android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                                            val bytesTotal = cursor.getLong(cursor.getColumnIndex(android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                                            downloadStatus = status
+                                            downloadProgress = if (bytesTotal > 0) bytesDownloaded.toFloat() / bytesTotal else 0f
+                                            if (status == android.app.DownloadManager.STATUS_SUCCESSFUL) {
+                                                cursor.close()
+                                                downloadStatus = 8
+                                                downloadProgress = 1f
+                                                downloadedFilePath = downloadId.toString()
+                                                downloaded = true
+                                                settingsManager.setDownloadedUpdate(latestVersion, downloadId)
+                                                // Автоматическая установка APK
+                                                UpdateChecker.installDownloadedApk(context, downloadId)
+                                                break
+                                            } else if (status == android.app.DownloadManager.STATUS_FAILED) {
+                                                cursor.close()
+                                                downloadStatus = 16
+                                                break
+                                            }
+                                        }
+                                        cursor.close()
+                                        kotlinx.coroutines.delay(1000)
+                                    }
+                                    downloadInProgress = false
+                                } catch (e: Exception) {
+                                    downloadInProgress = false
+                                    errorMessage = e.message ?: "Ошибка загрузки обновления"
+                                    downloadStatus = 16
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White)
+                    ) {
+                        Icon(imageVector = Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Загрузить обновление", fontSize = 18.sp)
+                    }
+                }
+            }
+            if (errorMessage.isNotEmpty()) {
+                Text(errorMessage, color = Color.Red, modifier = Modifier.padding(top = 8.dp))
+            }
         }
+    }
+    // SnackbarHost для баннера
+    Box(modifier = Modifier.fillMaxSize()) {
+        SnackbarHost(hostState = snackbarHostState)
     }
 }
 
