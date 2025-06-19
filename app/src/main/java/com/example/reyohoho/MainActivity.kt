@@ -518,7 +518,7 @@ class MainActivity : ComponentActivity() {
     private fun startUpdateDownload(context: Context) {
         lifecycleScope.launch {
             try {
-                val result = com.example.reyohoho.ui.UpdateChecker.checkForUpdate()
+                val result = com.example.reyohoho.ui.UpdateChecker.checkForUpdate(context)
                 if (result.isUpdateAvailable) {
                     com.example.reyohoho.ui.UpdateChecker.downloadAndInstallApk(context, result.downloadUrl, result.latestVersion, autoInstall = true)
                 }

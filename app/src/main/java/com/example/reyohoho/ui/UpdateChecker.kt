@@ -34,12 +34,12 @@ object UpdateChecker {
 
     private const val GITHUB_API_URL = "https://api.github.com/repos/Wkeynhk/ReYohoho-Mobile/releases/latest"
 
-    suspend fun checkForUpdate(): UpdateResult = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdate(context: Context): UpdateResult = withContext(Dispatchers.IO) {
         val client = OkHttpClient()
         val request = Request.Builder().url(GITHUB_API_URL).build()
         val response = client.newCall(request).execute()
         if (!response.isSuccessful) {
-            throw Exception("Ошибка запроса к GitHub: ${response.code}")
+            throw Exception("Ошибка запроса к GitHub: \\${response.code}")
         }
         val body = response.body?.string() ?: throw Exception("Пустой ответ от GitHub")
         val json = JSONObject(body)
@@ -60,7 +60,7 @@ object UpdateChecker {
         if (apkUrl.isEmpty()) {
             throw Exception("APK не найден в релизе")
         }
-        val currentVersion = "3.1"
+        val currentVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionName
         val latestVersion = tagName.replace("v", "")
         val isUpdate = latestVersion != currentVersion
         UpdateResult(isUpdate, latestVersion, apkUrl)
@@ -195,7 +195,7 @@ class UpdateCheckWorker(appContext: Context, workerParams: WorkerParameters) : C
             if (ignoredUpdateVersion != null && latestVersion == ignoredUpdateVersion) {
                 return Result.success()
             }
-            val result = UpdateChecker.checkForUpdate()
+            val result = UpdateChecker.checkForUpdate(applicationContext)
             latestVersion = result.latestVersion
             if (result.isUpdateAvailable) {
                 if (ignoredUpdateVersion == null || latestVersion != ignoredUpdateVersion) {

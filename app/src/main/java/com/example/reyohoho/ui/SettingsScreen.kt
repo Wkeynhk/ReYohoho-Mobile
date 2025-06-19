@@ -651,7 +651,7 @@ fun AboutScreen(
                     errorMessage = ""
                     coroutineScope.launch {
                         try {
-                            val result = UpdateChecker.checkForUpdate()
+                            val result = UpdateChecker.checkForUpdate(context)
                             isChecking = false
                             if (result.isUpdateAvailable) {
                                 updateAvailable = true
@@ -670,31 +670,6 @@ fun AboutScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(if (isChecking) "Проверка..." else "Проверить обновление")
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            // ВОССТАНОВЛЕННЫЙ ПЕРЕКЛЮЧАТЕЛЬ
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Уведомлять о новой версии",
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    modifier = Modifier.weight(1f)
-                )
-                Switch(
-                    checked = notifyOnUpdate,
-                    onCheckedChange = onNotifyOnUpdateChange,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color(0xFF4CAF50),
-                        checkedTrackColor = Color(0x884CAF50),
-                        uncheckedThumbColor = Color.Gray,
-                        uncheckedTrackColor = Color(0x33FFFFFF)
-                    )
-                )
             }
             Spacer(modifier = Modifier.height(16.dp))
             if (updateAvailable) {
@@ -717,7 +692,7 @@ fun AboutScreen(
                                 downloadInProgress = true
                                 coroutineScope.launch {
                                     try {
-                                        val result = UpdateChecker.checkForUpdate()
+                                        val result = UpdateChecker.checkForUpdate(context)
                                         val downloadId = UpdateChecker.downloadApkOnly(context, result.downloadUrl, latestVersion)
                                         settingsManager.setDownloadedUpdate(latestVersion, downloadId)
                                         val dm = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
@@ -775,7 +750,7 @@ fun AboutScreen(
                             downloadInProgress = true
                             coroutineScope.launch {
                                 try {
-                                    val result = UpdateChecker.checkForUpdate()
+                                    val result = UpdateChecker.checkForUpdate(context)
                                     val downloadId = UpdateChecker.downloadApkOnly(context, result.downloadUrl, latestVersion)
                                     settingsManager.setDownloadedUpdate(latestVersion, downloadId)
                                     val dm = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
@@ -829,6 +804,34 @@ fun AboutScreen(
             }
             if (errorMessage.isNotEmpty()) {
                 Text(errorMessage, color = Color.Red, modifier = Modifier.padding(top = 8.dp))
+            }
+            if (!updateAvailable && !isChecking && errorMessage.isEmpty()) {
+                Text("У вас последняя версия", color = Color(0xFF4CAF50), fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            // Параметр 'Уведомлять о новой версии' (Row с Switch)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Уведомлять о новой версии",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = notifyOnUpdate,
+                    onCheckedChange = onNotifyOnUpdateChange,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color(0xFF4CAF50),
+                        checkedTrackColor = Color(0x884CAF50),
+                        uncheckedThumbColor = Color.Gray,
+                        uncheckedTrackColor = Color(0x33FFFFFF)
+                    )
+                )
             }
         }
     }
