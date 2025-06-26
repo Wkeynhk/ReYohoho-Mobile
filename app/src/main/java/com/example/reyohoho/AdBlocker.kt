@@ -1,5 +1,6 @@
 package com.example.reyohoho
 
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -16,6 +17,7 @@ class AdBlocker {
     companion object {
         private const val TAG = "PowerAdBlocker"
         private const val EASYLIST_URL = "https://easylist-downloads.adblockplus.org/ruadlist+easylist.txt"
+        private const val LOCAL_DOMAINS_FILE = "adblock_domains.txt"
         
         // Паттерны для извлечения доменов из RuAdList
         private val DOMAIN_PATTERN = Pattern.compile("^\\|\\|([a-z0-9][a-z0-9.-]*\\.(?:[a-z]{2,}|xn--[a-z0-9]+))\\^")
@@ -41,21 +43,57 @@ class AdBlocker {
         @Volatile
         private var isInitialized = false
         
+        // Режим загрузки доменов
+        @Volatile
+        private var useLocalFile = false
+        
         /**
-         * Инициализация блокировщика: загрузка списка доменов из RuAdList+EasyList
+         * Инициализация блокировщика: загрузка списка доменов
          */
-        suspend fun initialize() {
+        suspend fun initialize(context: Context) {
             if (isInitialized) return
             
             try {
-                Log.d(TAG, "Начало инициализации AdBlocker с RuAdList+EasyList")
+                Log.d(TAG, "Начало инициализации AdBlocker")
                 
                 withContext(Dispatchers.IO) {
-                    val domains = fetchFilterList(EASYLIST_URL)
-                    Log.d(TAG, "Загружено ${domains.size} доменов из фильтр-листа")
-                    
-                    domains.forEach { domain ->
-                        blockingDomains[domain] = true
+                    if (useLocalFile) {
+                        // Режим локального файла
+                        val localDomains = loadLocalDomains(context)
+                        if (localDomains.isNotEmpty()) {
+                            Log.d(TAG, "Загружено ${localDomains.size} доменов из локального файла")
+                            localDomains.forEach { domain ->
+                                blockingDomains[domain] = true
+                            }
+                        } else {
+                            Log.w(TAG, "Локальный файл пуст, загружаем резервный список")
+                            loadFallbackDomains()
+                        }
+                    } else {
+                        // Режим интернета (по умолчанию)
+                        try {
+                            val onlineDomains = fetchFilterList(EASYLIST_URL)
+                            if (onlineDomains.isNotEmpty()) {
+                                Log.d(TAG, "Загружено ${onlineDomains.size} доменов из интернета")
+                                onlineDomains.forEach { domain ->
+                                    blockingDomains[domain] = true
+                                }
+                            } else {
+                                throw Exception("Пустой список доменов из интернета")
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Ошибка загрузки из интернета: ${e.message}, пробуем локальный файл")
+                            val localDomains = loadLocalDomains(context)
+                            if (localDomains.isNotEmpty()) {
+                                Log.d(TAG, "Загружено ${localDomains.size} доменов из локального файла")
+                                localDomains.forEach { domain ->
+                                    blockingDomains[domain] = true
+                                }
+                            } else {
+                                Log.w(TAG, "Локальный файл тоже пуст, загружаем резервный список")
+                                loadFallbackDomains()
+                            }
+                        }
                     }
                 }
                 
@@ -63,9 +101,113 @@ class AdBlocker {
                 Log.d(TAG, "AdBlocker успешно инициализирован")
             } catch (e: Exception) {
                 Log.e(TAG, "Ошибка при инициализации AdBlocker: ${e.message}")
-                // Загружаем базовые домены для блокировки
                 loadFallbackDomains()
             }
+        }
+        
+        /**
+         * Переключение режима загрузки доменов
+         */
+        fun setUseLocalFile(useLocal: Boolean) {
+            useLocalFile = useLocal
+            Log.d(TAG, "Режим загрузки доменов изменен на: ${if (useLocal) "локальный файл" else "интернет"}")
+        }
+        
+        /**
+         * Получение текущего режима загрузки
+         */
+        fun isUsingLocalFile(): Boolean {
+            return useLocalFile
+        }
+        
+        /**
+         * Проверка доступности интернет-источника
+         */
+        suspend fun checkInternetSourceAvailable(): Boolean {
+            return withContext(Dispatchers.IO) {
+                try {
+                    val connection = URL(EASYLIST_URL).openConnection()
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 10000
+                    connection.connect()
+                    true
+                } catch (e: Exception) {
+                    Log.w(TAG, "Интернет-источник недоступен: ${e.message}")
+                    false
+                }
+            }
+        }
+        
+        /**
+         * Проверка доступности локального файла
+         */
+        fun checkLocalFileAvailable(context: Context): Boolean {
+            return try {
+                context.assets.open(LOCAL_DOMAINS_FILE).use { inputStream ->
+                    inputStream.available() > 0
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Локальный файл недоступен: ${e.message}")
+                false
+            }
+        }
+        
+        /**
+         * Принудительная перезагрузка доменов
+         */
+        suspend fun reloadDomains(context: Context) {
+            try {
+                Log.d(TAG, "Принудительная перезагрузка доменов")
+                
+                // Очищаем текущий список доменов
+                blockingDomains.clear()
+                isInitialized = false
+                
+                // Переинициализируем с новыми настройками
+                initialize(context)
+                
+                Log.d(TAG, "Домены успешно перезагружены")
+            } catch (e: Exception) {
+                Log.e(TAG, "Ошибка при перезагрузке доменов: ${e.message}")
+                loadFallbackDomains()
+            }
+        }
+        
+        /**
+         * Загрузка доменов из локального файла assets
+         */
+        private fun loadLocalDomains(context: Context): Set<String> {
+            val domains = HashSet<String>()
+            var totalLines = 0
+            
+            try {
+                context.assets.open(LOCAL_DOMAINS_FILE).use { inputStream ->
+                    BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                        var line: String?
+                        
+                        while (reader.readLine().also { line = it } != null) {
+                            totalLines++
+                            line?.let { l ->
+                                // Проходим только стандартные правила блокировки
+                                if (!l.startsWith("!") && !l.startsWith("[") && 
+                                    !l.startsWith("@@") && l.isNotBlank()) {
+                                    
+                                    // Попытка извлечь домен из правила
+                                    extractDomain(l)?.let { domain ->
+                                        domains.add(domain)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Log.d(TAG, "Обработано $totalLines строк из локального файла")
+            } catch (e: Exception) {
+                Log.e(TAG, "Ошибка при загрузке локального файла: ${e.message}")
+            }
+            
+            return domains
         }
         
         /**
@@ -254,6 +396,13 @@ class AdBlocker {
             }
             
             return false
+        }
+        
+        /**
+         * Получение количества загруженных доменов для отладки
+         */
+        fun getLoadedDomainsCount(): Int {
+            return blockingDomains.size
         }
     }
 } 

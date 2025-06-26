@@ -13,6 +13,10 @@ import android.webkit.CookieManager
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import android.app.PictureInPictureParams
+import android.util.Rational
+import android.content.res.Configuration
+import android.graphics.Rect
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
@@ -85,6 +89,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Close
 import android.content.Context
+import android.app.PendingIntent
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
+import android.webkit.JavascriptInterface
+import androidx.compose.foundation.layout.Arrangement
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -116,6 +125,12 @@ class MainActivity : ComponentActivity() {
     
     private val STORAGE_PERMISSION_CODE = 1001
     
+    // Переменная для хранения состояния PiP
+    private var isInPipMode = false
+    
+    // Медиа-сессия для улучшения PiP режима
+    private var mediaSession: MediaSession? = null
+    
     @SuppressLint("InlinedApi")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -144,6 +159,9 @@ class MainActivity : ComponentActivity() {
             
             // Настройка правильного отображения системных кнопок
             setupImmersiveMode()
+            
+            // Инициализация MediaSession для PiP режима
+            setupMediaSession()
             
             // По умолчанию включаем настройку "убрать отступ сверху" при первом запуске
             if (!settingsManager.isDeviceTypeSet()) {
@@ -174,6 +192,12 @@ class MainActivity : ComponentActivity() {
             // Если нет входящего URL, используем выбранное зеркало из настроек
             val finalUrl = urlToLoad ?: settingsManager.getSiteMirror()
             Log.d(TAG, "Загружаем URL: $finalUrl")
+            
+            val appVersion = try {
+                packageManager.getPackageInfo(packageName, 0).versionName ?: "3.2"
+            } catch (e: Exception) {
+                "3.2" // fallback версия
+            }
             
             setContent {
                 // Всегда используем темную тему независимо от настроек системы
@@ -217,8 +241,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
-
-                    val appVersion = "3.11"
 
                     Box(modifier = Modifier.fillMaxSize()) {
                         // Если необходимо выбрать тип устройства при первом запуске
@@ -269,20 +291,20 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                             }
+                            }
                             
-                            // Кнопка настроек отображается только когда не показаны настройки
-                            if (!showSettings) {
-                                Box(
+                        // Кнопка настроек в правом нижнем углу
+                        if (!showSettings && !showDeviceTypeSelection && !showTVCursorPrompt) {
+                            Column(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(16.dp),
-                                    contentAlignment = Alignment.BottomEnd
+                                    .padding(end = 16.dp, bottom = 80.dp),
+                                verticalArrangement = Arrangement.Bottom,
+                                horizontalAlignment = Alignment.End
                                 ) {
                                     Button(
                                         onClick = { showSettings = true },
-                                        modifier = Modifier
-                                            .padding(end = 24.dp, bottom = 80.dp)
-                                            .size(56.dp),
+                                    modifier = Modifier.size(56.dp),
                                         shape = CircleShape,
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = Color.Black,
@@ -290,12 +312,12 @@ class MainActivity : ComponentActivity() {
                                         ),
                                         contentPadding = PaddingValues(0.dp)
                                     ) {
-                                        Text(
-                                            text = "⚙",
-                                            fontSize = 28.sp,
-                                            textAlign = TextAlign.Center
+                                    Icon(
+                                        imageVector = Icons.Default.Settings,
+                                        contentDescription = "Настройки",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(28.dp)
                                         )
-                                    }
                                 }
                             }
                         }
@@ -373,7 +395,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 Log.d(TAG, "Начинаем инициализацию блокировщика рекламы...")
-                AdBlocker.initialize()
+                AdBlocker.initialize(this@MainActivity)
                 Log.d(TAG, "Блокировщик рекламы успешно инициализирован")
             } catch (e: Exception) {
                 Log.e(TAG, "Ошибка при инициализации блокировщика рекламы: ${e.message}")
@@ -474,37 +496,15 @@ class MainActivity : ComponentActivity() {
     }
     
     /**
-     * Обработка кнопки "Назад" для корректной навигации в WebView
-     */
-    @Deprecated("Заменено на OnBackPressedDispatcher", level = DeprecationLevel.WARNING)
-    override fun onBackPressed() {
-        // Сначала проверяем, можно ли вернуться назад в WebView
-        if (currentWebView?.canGoBack() == true) {
-            currentWebView?.goBack()
-            return
-        }
-        
-        // Требуем двойное нажатие для выхода из приложения
-        if (doubleBackToExitPressedOnce) {
-            // Принудительно сохраняем cookie перед выходом
-            CookieManager.getInstance().flush()
-            super.onBackPressed()
-            return
-        }
-        
-        doubleBackToExitPressedOnce = true
-        Toast.makeText(this, "Нажмите ещё раз для выхода", Toast.LENGTH_SHORT).show()
-        
-        // Сбрасываем флаг через 2 секунды
-        Handler(Looper.getMainLooper()).postDelayed({
-            doubleBackToExitPressedOnce = false
-        }, 2000)
-    }
-    
-    /**
      * Вызывается при уничтожении активности
      */
     override fun onDestroy() {
+        // Освобождаем MediaSession
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            mediaSession?.release()
+            mediaSession = null
+        }
+        
         // Сохраняем cookie перед закрытием приложения
         try {
             CookieManager.getInstance().flush()
@@ -525,6 +525,420 @@ class MainActivity : ComponentActivity() {
             } catch (e: Exception) {
                 // No logging needed here
             }
+        }
+    }
+
+    // Метод для перехода в режим PiP для API 26+
+    @Suppress("DEPRECATION")
+    fun enterPictureInPictureMode(videoWidth: Int = 16, videoHeight: Int = 9) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                Log.d(TAG, "Попытка входа в режим PiP с пропорциями $videoWidth:$videoHeight")
+                
+                // Находим текущее видео и подготавливаем его к PiP
+                currentWebView?.evaluateJavascript("""
+                    (function() {
+                        // Функция для поиска всех возможных видео элементов
+                        function findAllVideoElements() {
+                            // Прямой поиск видео на странице
+                            let videos = Array.from(document.querySelectorAll('video'));
+                            
+                            // Поиск видео в Lumex плеере
+                            const lumexVideo = document.querySelector('#vjs_video_3_html5_api');
+                            if (lumexVideo && !videos.includes(lumexVideo)) {
+                                videos.push(lumexVideo);
+                            }
+                            
+                            // Поиск видео во всех iframe
+                            document.querySelectorAll('iframe').forEach(function(iframe) {
+                                try {
+                                    const iframeDocument = iframe.contentDocument || iframe.contentWindow && iframe.contentWindow.document;
+                                    if (iframeDocument) {
+                                        iframeDocument.querySelectorAll('video').forEach(function(video) {
+                                            videos.push(video);
+                                        });
+                                    }
+                                } catch (e) {
+                                    console.log('Не удалось получить доступ к видео в iframe: ' + e);
+                                }
+                            });
+                            
+                            return videos;
+                        }
+                        
+                        // Находим все видео на странице
+                        const videos = findAllVideoElements();
+                        console.log('Найдено видео элементов: ' + videos.length);
+                        
+                        // Находим воспроизводящееся видео или первое видео
+                        const activeVideo = videos.find(v => !v.paused && v.currentTime > 0) || videos[0];
+                        
+                        // Если нашли видео, делаем его на весь экран и скрываем элементы управления
+                        if (activeVideo) {
+                            console.log('Подготовка видео к режиму PiP');
+                            
+                            // Сохраняем текущее состояние видео
+                            window._pipVideoState = {
+                                wasPlaying: !activeVideo.paused,
+                                currentTime: activeVideo.currentTime
+                            };
+                            
+                            // Запускаем воспроизведение, если видео было на паузе
+                            if (activeVideo.paused) {
+                                activeVideo.play().catch(e => console.log('Не удалось запустить воспроизведение: ' + e));
+                            }
+                            
+                            // Увеличиваем громкость, если она была приглушена
+                            if (activeVideo.volume < 0.1) {
+                                activeVideo.volume = 0.5;
+                            }
+                            
+                            // Убираем mute, если звук был выключен
+                            if (activeVideo.muted) {
+                                activeVideo.muted = false;
+                            }
+                            
+                            // Попробуем эмулировать нажатие на элементы управления
+                            if (window.ReYoHoHoPipHelper && typeof window.ReYoHoHoPipHelper.activatePipMode === 'function') {
+                                window.ReYoHoHoPipHelper.activatePipMode(activeVideo.videoWidth, activeVideo.videoHeight);
+                            }
+                        }
+                        
+                        // Скрываем элементы управления UI перед переходом в PiP
+                        document.querySelectorAll('.pip-hide, [data-pip-hide="true"], .control-bar, .player-controls, .vjs-control-bar')
+                            .forEach(function(el) {
+                                el.style.visibility = 'hidden';
+                            });
+                            
+                        // Для Lumex плеера
+                        const lumexPlayer = document.querySelector('#vjs_video_3');
+                        if (lumexPlayer) {
+                            // Удаляем класс, который может блокировать PiP
+                            lumexPlayer.classList.remove('vjs-hidden');
+                            
+                            // Проверяем, есть ли нативная кнопка PiP в плеере
+                            const pipButton = lumexPlayer.querySelector('.vjs-picture-in-picture-control') || 
+                                              lumexPlayer.querySelector('[aria-label="Картинка в картинке"]');
+                            
+                            if (pipButton && !pipButton.disabled) {
+                                console.log('Нажимаем на кнопку PiP в Lumex плеере');
+                                pipButton.click();
+                            }
+                        }
+                    })();
+                """.trimIndent(), null)
+
+                // Короткая задержка, чтобы JS успел выполниться
+                try {
+                    Thread.sleep(100)
+                } catch (e: InterruptedException) {
+                    Log.e(TAG, "Ошибка при задержке: ${e.message}")
+                }
+                
+                // Создаем параметры для PiP
+                val builder = PictureInPictureParams.Builder()
+                
+                // Устанавливаем соотношение сторон (по умолчанию 16:9, но может быть изменено)
+                val rational = Rational(videoWidth, videoHeight)
+                builder.setAspectRatio(rational)
+                
+                // Добавляем информацию о прямоугольнике источника (для плавной анимации)
+                currentWebView?.let { webView ->
+                    val rect = Rect()
+                    webView.getGlobalVisibleRect(rect)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        builder.setSourceRectHint(rect)
+                    }
+                    
+                    // Устанавливаем автоматический вход в режим PiP при совместимых действиях
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        builder.setAutoEnterEnabled(true)
+                    }
+                }
+                
+                // Переходим в режим PiP
+                enterPictureInPictureMode(builder.build())
+                
+                Log.d(TAG, "Успешный переход в режим PiP")
+            } catch (e: Exception) {
+                Log.e(TAG, "Ошибка при переходе в режим PiP: ${e.message}")
+                e.printStackTrace()
+                
+                // Показываем расширенную информацию об ошибке
+                val errorMessage = "Ошибка PiP: ${e.message}\nВам может потребоваться включить режим «Картинка в картинке» для приложения в настройках Android."
+                Toast.makeText(this, errorMessage, Toast.LENGTH_LONG).show()
+                
+                // Пробуем открыть настройки приложения
+                try {
+                    val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    intent.data = Uri.fromParts("package", packageName, null)
+                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    startActivity(intent)
+                } catch (ex: Exception) {
+                    Log.e(TAG, "Не удалось открыть настройки приложения: ${ex.message}")
+                }
+            }
+        } else {
+            // Для старых версий Android показываем уведомление
+            Toast.makeText(
+                this,
+                "Режим «Картинка в картинке» требует Android 8.0 (Oreo) или выше. У вас Android ${Build.VERSION.RELEASE}",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+    
+    /**
+     * Инициализация и настройка MediaSession для улучшения работы PiP режима
+     */
+    @SuppressLint("InlinedApi")
+    private fun setupMediaSession() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try {
+                // Создаем медиа-сессию
+                mediaSession = MediaSession(this, "ReYohohoMediaSession")
+                
+                // Настраиваем колбэки для медиа-сессии
+                mediaSession?.setCallback(object : MediaSession.Callback() {
+                    override fun onPlay() {
+                        super.onPlay()
+                        Log.d(TAG, "MediaSession: onPlay вызван")
+                        sendJavaScriptToWebView("if(document.querySelector('video')){document.querySelector('video').play();}")
+                    }
+                    
+                    override fun onPause() {
+                        super.onPause()
+                        Log.d(TAG, "MediaSession: onPause вызван")
+                        sendJavaScriptToWebView("if(document.querySelector('video')){document.querySelector('video').pause();}")
+                    }
+                    
+                    override fun onStop() {
+                        super.onStop()
+                        Log.d(TAG, "MediaSession: onStop вызван")
+                        sendJavaScriptToWebView("if(document.querySelector('video')){document.querySelector('video').pause();}")
+                    }
+                    
+                    override fun onSkipToNext() {
+                        super.onSkipToNext()
+                        Log.d(TAG, "MediaSession: onSkipToNext вызван")
+                        sendJavaScriptToWebView("""
+                            (function() {
+                                // Имитируем нажатие на кнопку "Следующая серия" в плеере
+                                const nextButtons = document.querySelectorAll('[class*="next"], [title*="След"], [aria-label*="след"], .next-episode, .next-button');
+                                if (nextButtons.length > 0) {
+                                    nextButtons[0].click();
+                                    return true;
+                                }
+                                return false;
+                            })();
+                        """.trimIndent())
+                    }
+                    
+                    override fun onSkipToPrevious() {
+                        super.onSkipToPrevious()
+                        Log.d(TAG, "MediaSession: onSkipToPrevious вызван")
+                        sendJavaScriptToWebView("""
+                            (function() {
+                                // Имитируем нажатие на кнопку "Предыдущая серия" в плеере
+                                const prevButtons = document.querySelectorAll('[class*="prev"], [title*="Пред"], [aria-label*="пред"], .prev-episode, .prev-button');
+                                if (prevButtons.length > 0) {
+                                    prevButtons[0].click();
+                                    return true;
+                                }
+                                return false;
+                            })();
+                        """.trimIndent())
+                    }
+                    
+                    override fun onSeekTo(pos: Long) {
+                        super.onSeekTo(pos)
+                        Log.d(TAG, "MediaSession: onSeekTo вызван: $pos")
+                        sendJavaScriptToWebView("if(document.querySelector('video')){document.querySelector('video').currentTime = ${pos / 1000.0};}")
+                    }
+                })
+                
+                // Активируем медиа-сессию
+                mediaSession?.isActive = true
+                
+                // Настраиваем состояние воспроизведения
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    val stateBuilder = PlaybackState.Builder()
+                        .setActions(
+                            PlaybackState.ACTION_PLAY or 
+                            PlaybackState.ACTION_PAUSE or 
+                            PlaybackState.ACTION_SKIP_TO_NEXT or 
+                            PlaybackState.ACTION_SKIP_TO_PREVIOUS or 
+                            PlaybackState.ACTION_SEEK_TO or 
+                            PlaybackState.ACTION_PLAY_PAUSE
+                        )
+                        .setState(PlaybackState.STATE_PLAYING, 0, 1.0f)
+                    
+                    mediaSession?.setPlaybackState(stateBuilder.build())
+                }
+                
+                Log.d(TAG, "MediaSession успешно настроена")
+            } catch (e: Exception) {
+                Log.e(TAG, "Ошибка при настройке MediaSession: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Метод для отправки JavaScript в WebView
+     */
+    private fun sendJavaScriptToWebView(jsCode: String) {
+        try {
+            currentWebView?.post {
+                try {
+                    currentWebView?.evaluateJavascript(jsCode, null)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Ошибка при выполнении JavaScript: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка при отправке JavaScript: ${e.message}")
+        }
+    }
+    
+    /**
+     * Обновляет состояние MediaSession на основе состояния воспроизведения видео
+     */
+    private fun updateMediaSessionState(isPlaying: Boolean, position: Long, duration: Long) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && mediaSession != null) {
+            try {
+                val state = if (isPlaying) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
+                
+                val stateBuilder = PlaybackState.Builder()
+                    .setActions(
+                        PlaybackState.ACTION_PLAY or 
+                        PlaybackState.ACTION_PAUSE or 
+                        PlaybackState.ACTION_SKIP_TO_NEXT or 
+                        PlaybackState.ACTION_SKIP_TO_PREVIOUS or 
+                        PlaybackState.ACTION_SEEK_TO or 
+                        PlaybackState.ACTION_PLAY_PAUSE
+                    )
+                    .setState(state, position, 1.0f)
+                
+                mediaSession?.setPlaybackState(stateBuilder.build())
+                
+                // Создаем PendingIntent для возврата в приложение из PiP режима
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val intent = Intent(this, MainActivity::class.java)
+                    intent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
+                    
+                    val pendingIntent = PendingIntent.getActivity(this, 0, intent, flags)
+                    
+                    // Обновляем PiP действия
+                    val builder = PictureInPictureParams.Builder()
+                    mediaSession?.setPlaybackState(stateBuilder.build())
+                    
+                    try {
+                        setPictureInPictureParams(builder.build())
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Ошибка при обновлении PiP параметров: ${e.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Ошибка при обновлении состояния MediaSession: ${e.message}")
+            }
+        }
+    }
+    
+    // Обработка изменения конфигурации (включая вход/выход из режима PiP)
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        
+        // Проверяем, находимся ли мы в режиме PiP
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val wasPipMode = isInPipMode
+            isInPipMode = isInPictureInPictureMode
+            
+            // Событие входа в режим PiP
+            if (isInPipMode && !wasPipMode) {
+                Log.d(TAG, "Приложение вошло в режим PiP")
+                
+                // Скрываем элементы UI, которые не нужны в режиме PiP
+                try {
+                    currentWebView?.evaluateJavascript("""
+                        (function() {
+                            // Отправляем событие, что мы вошли в режим PiP
+                            document.documentElement.setAttribute('data-pip-mode', 'true');
+                            
+                            // Если есть наша функция обработки PiP, вызываем её
+                            if (window.ReYoHoHoPipHelper && window.ReYoHoHoPipHelper.onEnterPipMode) {
+                                window.ReYoHoHoPipHelper.onEnterPipMode();
+                            }
+                            
+                            // Проверяем состояние видео каждую секунду и обновляем MediaSession
+                            window._pipVideoMonitorInterval = setInterval(function() {
+                                const video = document.querySelector('video');
+                                if (video) {
+                                    try {
+                                        // Передаем состояние видео в Android
+                                        AndroidActivity.updateMediaSessionState(
+                                            String(!video.paused), 
+                                            String(Math.floor(video.currentTime * 1000)), 
+                                            String(Math.floor(video.duration * 1000))
+                                        );
+                                    } catch(e) {
+                                        console.log('Ошибка при обновлении MediaSession:', e);
+                                    }
+                                }
+                            }, 1000);
+                        })();
+                    """.trimIndent(), null)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Ошибка при обработке входа в режим PiP: ${e.message}")
+                }
+            } else if (!isInPipMode && wasPipMode) {
+                // Событие выхода из режима PiP
+                Log.d(TAG, "Приложение вышло из режима PiP")
+                
+                // Восстанавливаем нормальный интерфейс
+                try {
+                    currentWebView?.evaluateJavascript("""
+                        (function() {
+                            // Отправляем событие, что мы вышли из режима PiP
+                            document.documentElement.removeAttribute('data-pip-mode');
+                            
+                            // Очищаем интервал мониторинга
+                            if (window._pipVideoMonitorInterval) {
+                                clearInterval(window._pipVideoMonitorInterval);
+                                window._pipVideoMonitorInterval = null;
+                            }
+                            
+                            // Если есть наша функция обработки PiP, вызываем её
+                            if (window.ReYoHoHoPipHelper && window.ReYoHoHoPipHelper.onExitPipMode) {
+                                window.ReYoHoHoPipHelper.onExitPipMode();
+                            }
+                        })();
+                    """.trimIndent(), null)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Ошибка при обработке выхода из режима PiP: ${e.message}")
+                }
+            }
+        }
+    }
+    
+    /**
+     * Обновляет состояние MediaSession (вызывается из JavaScript)
+     */
+    @JavascriptInterface
+    fun updateMediaSessionState(isPlayingStr: String, positionStr: String, durationStr: String) {
+        try {
+            val isPlaying = isPlayingStr.toBoolean()
+            val position = positionStr.toLong()
+            val duration = durationStr.toLong()
+            
+            Log.d(TAG, "Обновление состояния MediaSession: isPlaying=$isPlaying, position=$position, duration=$duration")
+            
+            // Выполняем на основном потоке
+            runOnUiThread {
+                updateMediaSessionState(isPlaying, position, duration)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка при обновлении состояния MediaSession из JS: ${e.message}")
         }
     }
 }

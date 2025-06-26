@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.reyohoho.MainActivity
 import com.example.reyohoho.R
+import com.example.reyohoho.AdBlocker
 import com.example.reyohoho.ui.theme.ReYohohoTheme
 import com.example.reyohoho.ui.formatFileSize
 import kotlinx.coroutines.launch
@@ -37,10 +38,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material.icons.filled.Refresh
 import android.app.DownloadManager
 import kotlinx.coroutines.delay
@@ -52,6 +49,18 @@ import androidx.compose.material3.SnackbarData
 import androidx.compose.material3.SnackbarResult
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.example.reyohoho.DownloadStatus
+import com.example.reyohoho.AppDownloadManager
+import android.app.Activity
+import com.example.reyohoho.DownloadInfo
+import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.CoroutineScope
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.ui.draw.clip
+import kotlinx.coroutines.Job
 
 /**
  * Экран настроек приложения
@@ -97,6 +106,12 @@ fun SettingsScreen(
                 },
                 appVersion = appVersion
             )
+            "downloads" -> DownloadsScreen(onBack = { currentScreen = "main" }, onClose = onClose)
+            "download_settings" -> DownloadSettingsScreen(
+                settingsManager = settingsManager,
+                onBack = { currentScreen = "main" },
+                onClose = onClose
+            )
         }
     }
 }
@@ -113,6 +128,16 @@ fun MainSettingsScreen(
     onNavigateTo: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val downloadManager = remember {
+        try {
+            AppDownloadManager.getInstance(context)
+        } catch (e: Exception) {
+            null
+        }
+    }
+    val activeDownloads by downloadManager?.activeDownloads?.collectAsState() ?: remember { mutableStateOf(emptyMap<Long, DownloadInfo>()) }
+    val downloadHistory by downloadManager?.downloadHistory?.collectAsState() ?: remember { mutableStateOf(emptyList<DownloadInfo>()) }
+    val coroutineScope = rememberCoroutineScope()
     
     Column(
         modifier = Modifier
@@ -171,6 +196,14 @@ fun MainSettingsScreen(
                     title = "Внешний вид",
                     subtitle = "Настройка отображения",
                     onClick = { onNavigateTo("appearance") }
+                )
+                
+                // Кнопка перехода к загрузкам
+                SettingsItem(
+                    icon = Icons.Default.Info,
+                    title = "Загрузки",
+                    subtitle = "Смотреть активные и завершённые загрузки",
+                    onClick = { onNavigateTo("downloads") }
                 )
                 
                 // О приложении
@@ -343,6 +376,215 @@ fun SiteSettingsScreen(
                     checked = disableZoom.value,
                     onCheckedChange = { settingsManager.toggleDisableZoom() }
                 )
+            }
+            
+            // Настройки блокировщика рекламы
+            item {
+                Text(
+                    text = "Блокировщик рекламы",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 16.dp)
+                )
+            }
+            
+            item {
+                val context = LocalContext.current
+                val coroutineScope = rememberCoroutineScope()
+                var useLocalFile by remember { mutableStateOf(AdBlocker.isUsingLocalFile()) }
+                var domainsCount by remember { mutableStateOf(AdBlocker.getLoadedDomainsCount()) }
+                var isCheckingAvailability by remember { mutableStateOf(false) }
+                var internetAvailable by remember { mutableStateOf(false) }
+                var localFileAvailable by remember { mutableStateOf(AdBlocker.checkLocalFileAvailable(context)) }
+                
+                // Проверяем доступность источников при загрузке
+                LaunchedEffect(Unit) {
+                    isCheckingAvailability = true
+                    internetAvailable = AdBlocker.checkInternetSourceAvailable()
+                    localFileAvailable = AdBlocker.checkLocalFileAvailable(context)
+                    
+                    // Автоматически переключаемся на локальный файл, если интернет недоступен
+                    if (!internetAvailable && localFileAvailable && !useLocalFile) {
+                        useLocalFile = true
+                        AdBlocker.setUseLocalFile(true)
+                        coroutineScope.launch {
+                            try {
+                                AdBlocker.reloadDomains(context)
+                                domainsCount = AdBlocker.getLoadedDomainsCount()
+                            } catch (e: Exception) {
+                                Log.e("SettingsScreen", "Ошибка при перезагрузке доменов: ${e.message}")
+                            }
+                        }
+                    }
+                    
+                    isCheckingAvailability = false
+                }
+                
+                Column {
+                    // Переключатель режима загрузки
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Использовать локальный файл",
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = if (useLocalFile) "Загружает домены из встроенного файла" else "Загружает домены из интернета",
+                                color = Color.Gray,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                        
+                        Switch(
+                            checked = useLocalFile,
+                            onCheckedChange = { newValue ->
+                                useLocalFile = newValue
+                                AdBlocker.setUseLocalFile(newValue)
+                                // Перезагружаем домены с новыми настройками
+                                coroutineScope.launch {
+                                    try {
+                                        AdBlocker.reloadDomains(context)
+                                        domainsCount = AdBlocker.getLoadedDomainsCount()
+                                    } catch (e: Exception) {
+                                        Log.e("SettingsScreen", "Ошибка при перезагрузке доменов: ${e.message}")
+                                    }
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color(0xFF4CAF50),
+                                checkedTrackColor = Color(0x884CAF50),
+                                uncheckedThumbColor = Color.Gray,
+                                uncheckedTrackColor = Color(0x33FFFFFF)
+                            )
+                        )
+                    }
+                    
+                    // Информация о доступности источников
+                    if (isCheckingAvailability) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Проверка доступности источников...",
+                                color = Color.Gray,
+                                fontSize = 12.sp
+                            )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Интернет",
+                                tint = if (internetAvailable) Color.Green else Color.Red,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Интернет: ${if (internetAvailable) "доступен" else "недоступен"}",
+                                color = Color.Gray,
+                                fontSize = 12.sp
+                            )
+                            
+                            Spacer(modifier = Modifier.width(16.dp))
+                            
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Локальный файл",
+                                tint = if (localFileAvailable) Color.Green else Color.Red,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Локальный файл: ${if (localFileAvailable) "доступен" else "недоступен"}",
+                                color = Color.Gray,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    
+                    // Количество загруженных доменов
+                    Row(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Домены",
+                            tint = Color.Blue,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Загружено доменов: $domainsCount",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    
+                    // Кнопка перезагрузки доменов
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable { 
+                                coroutineScope.launch {
+                                    try {
+                                        AdBlocker.reloadDomains(context)
+                                        domainsCount = AdBlocker.getLoadedDomainsCount()
+                                    } catch (e: Exception) {
+                                        Log.e("SettingsScreen", "Ошибка при перезагрузке доменов: ${e.message}")
+                                    }
+                                }
+                            },
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFF1A1A1A)
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Перезагрузить домены",
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Перезагрузить",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -569,6 +811,7 @@ fun AboutScreen(
     val savedDownloadedVersion = settingsManager.getDownloadedUpdateVersion()
     val savedDownloadedId = settingsManager.getDownloadedUpdateId()
     val ignoredUpdateVersion = settingsManager.getIgnoredUpdateVersion()
+    var wasChecked by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -608,7 +851,7 @@ fun AboutScreen(
             Spacer(modifier = Modifier.width(16.dp))
             IconButton(
                 onClick = onClose,
-                modifier = Modifier
+            modifier = Modifier
                     .size(42.dp)
                     .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
             ) {
@@ -620,10 +863,10 @@ fun AboutScreen(
             }
         }
         // Иконка под заголовком
-        Icon(
-            imageVector = Icons.Default.Info,
-            contentDescription = null,
-            tint = Color(0xFF4CAF50),
+            Icon(
+                imageVector = Icons.Default.Info,
+                contentDescription = null,
+                tint = Color(0xFF4CAF50),
             modifier = Modifier
                 .size(100.dp)
                 .align(Alignment.CenterHorizontally)
@@ -649,6 +892,7 @@ fun AboutScreen(
                     if (ignoredUpdateVersion == latestVersion) return@Button
                     isChecking = true
                     errorMessage = ""
+                    wasChecked = true
                     coroutineScope.launch {
                         try {
                             val result = UpdateChecker.checkForUpdate(context)
@@ -805,7 +1049,7 @@ fun AboutScreen(
             if (errorMessage.isNotEmpty()) {
                 Text(errorMessage, color = Color.Red, modifier = Modifier.padding(top = 8.dp))
             }
-            if (!updateAvailable && !isChecking && errorMessage.isEmpty()) {
+            if (wasChecked && !updateAvailable && !isChecking && errorMessage.isEmpty()) {
                 Text("У вас последняя версия", color = Color(0xFF4CAF50), fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
             }
             Spacer(modifier = Modifier.height(16.dp))
@@ -816,9 +1060,9 @@ fun AboutScreen(
                     .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
+            Text(
                     text = "Уведомлять о новой версии",
-                    color = Color.White,
+                color = Color.White,
                     fontSize = 16.sp,
                     modifier = Modifier.weight(1f)
                 )
@@ -832,7 +1076,7 @@ fun AboutScreen(
                         uncheckedTrackColor = Color(0x33FFFFFF)
                     )
                 )
-            }
+        }
         }
     }
     // SnackbarHost для баннера
@@ -898,13 +1142,7 @@ fun SwitchSettingItem(
             
             Switch(
                 checked = checked,
-                onCheckedChange = onCheckedChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color(0xFF4CAF50),
-                    checkedTrackColor = Color(0x884CAF50),
-                    uncheckedThumbColor = Color.Gray,
-                    uncheckedTrackColor = Color(0x33FFFFFF)
-                )
+                onCheckedChange = onCheckedChange
             )
         }
     }
@@ -970,6 +1208,482 @@ fun SettingsItem(
                 tint = Color.Gray,
                 modifier = Modifier.size(24.dp)
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DownloadsScreen(onBack: () -> Unit, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val downloadManager = remember {
+        try {
+            AppDownloadManager.getInstance(context)
+        } catch (e: Exception) {
+            null
+        }
+    }
+    val activeDownloads by downloadManager?.activeDownloads?.collectAsState() ?: remember { mutableStateOf(emptyMap<Long, DownloadInfo>()) }
+    val downloadHistory by downloadManager?.downloadHistory?.collectAsState() ?: remember { mutableStateOf(emptyList<DownloadInfo>()) }
+    val coroutineScope = rememberCoroutineScope()
+    val settingsManager = SettingsManager.getInstance(context)
+    var showSettings by remember { mutableStateOf(false) }
+
+    if (showSettings) {
+        DownloadSettingsScreen(
+            settingsManager = settingsManager,
+            onBack = { showSettings = false },
+            onClose = { showSettings = false }
+        )
+        return
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121212))
+            .padding(16.dp)
+    ) {
+        // Верхняя панель
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 36.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Назад",
+                    tint = Color.White
+                )
+            }
+            Text(
+                text = "Загрузки",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center
+            )
+            IconButton(
+                onClick = { showSettings = true },
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Настройки загрузок",
+                    tint = Color.White
+                )
+            }
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
+                    tint = Color.White
+                )
+            }
+        }
+        // Контент
+        if (activeDownloads.isNotEmpty() && downloadManager != null) {
+            Text("Активные загрузки", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(16.dp, 8.dp, 16.dp, 4.dp))
+            LazyColumn {
+                items(activeDownloads.values.toList(), key = { it.id }) { download ->
+                    DownloadCard(download, downloadManager, context, coroutineScope, true)
+                }
+            }
+        }
+        if (downloadHistory.isNotEmpty() && downloadManager != null) {
+            Text("Завершённые загрузки", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(16.dp, 12.dp, 16.dp, 4.dp))
+            LazyColumn {
+                items(downloadHistory, key = { it.id }) { download ->
+                    DownloadCard(download, downloadManager, context, coroutineScope, false)
+                }
+            }
+        }
+        if (activeDownloads.isEmpty() && downloadHistory.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Нет загрузок", color = Color.Gray)
+            }
+        }
+    }
+}
+
+@Composable
+fun DownloadCard(
+    download: DownloadInfo,
+    downloadManager: AppDownloadManager,
+    context: Context,
+    coroutineScope: CoroutineScope,
+    isActive: Boolean
+) {
+    val settingsManager = SettingsManager.getInstance(context)
+    val showSpeed by settingsManager.showDownloadSpeedFlow.collectAsState()
+    val showTime by settingsManager.showRemainingTimeFlow.collectAsState()
+    val progressMode by settingsManager.progressDisplayModeFlow.collectAsState()
+    val showConfirmation by settingsManager.showDownloadConfirmationFlow.collectAsState()
+    
+    var showDialog by remember { mutableStateOf(false) }
+    var dialogTitle by remember { mutableStateOf("") }
+    var dialogText by remember { mutableStateOf("") }
+    var confirmAction by remember { mutableStateOf<() -> Job>({ coroutineScope.launch { } }) }
+
+    val (speed, setSpeed) = remember { mutableStateOf(0L) }
+    val (lastDownloaded, setLastDownloaded) = remember { mutableStateOf(download.downloadedSize) }
+    val (lastTime, setLastTime) = remember { mutableStateOf(System.currentTimeMillis()) }
+    val (remainingTime, setRemainingTime) = remember { mutableStateOf(0L) }
+
+    if (isActive) {
+        LaunchedEffect(download.downloadedSize) {
+            val now = System.currentTimeMillis()
+            val deltaBytes = download.downloadedSize - lastDownloaded
+            val deltaTime = now - lastTime
+            if (deltaTime > 1000) {
+                setSpeed(if (deltaTime > 0) (deltaBytes * 1000) / deltaTime else 0)
+                setLastDownloaded(download.downloadedSize)
+                setLastTime(now)
+            }
+            if (download.fileSize > 0 && speed > 0) {
+                setRemainingTime(((download.fileSize - download.downloadedSize) / speed))
+            }
+        }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            containerColor = Color(0xFF2A2A2A),
+            title = { 
+                Text(
+                    text = dialogTitle,
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                ) 
+            },
+            text = { 
+                Text(
+                    text = dialogText,
+                    color = Color.Gray,
+                    fontSize = 14.sp
+                ) 
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmAction()
+                        showDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.Red.copy(alpha = 0.8f),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Подтвердить")
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = { showDialog = false },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1A1A1A),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF2A2A2A)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            // Верхняя часть: Название и крестик
+            Row(
+                verticalAlignment = Alignment.Top // Выравниваем по верху для совпадения с текстом
+            ) {
+                // Извлекаем название и качество из имени файла
+                val fullFileName = download.fileName
+                val title = if (fullFileName.contains(" - ")) fullFileName.substringBeforeLast(" - ").trim() else fullFileName
+                val qualityPart = if (fullFileName.contains(" - ")) fullFileName.substringAfterLast(" - ").trim() else ""
+                val quality = qualityPart.replace(".mp4", "").replace(".mkv", "") + "p"
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (qualityPart.isNotEmpty()) {
+                        Text(
+                            text = quality,
+                            color = Color.Gray,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                if (isActive) {
+                    IconButton(
+                        onClick = {
+                            val action = { coroutineScope.launch { downloadManager.cancelDownload(download.id) } }
+                            if (showConfirmation) {
+                                dialogTitle = "Отмена загрузки"
+                                dialogText = "Вы уверены, что хотите отменить загрузку файла?"
+                                confirmAction = action
+                                showDialog = true
+                            } else {
+                                action()
+                            }
+                        },
+                        modifier = Modifier.size(32.dp).offset(y = (-4).dp) // Смещаем для выравнивания
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Отменить", tint = Color.Red.copy(alpha = 0.8f))
+                    }
+                }
+            }
+
+            // Нижняя часть: Прогресс и кнопки
+            if (isActive) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LinearProgressIndicator(
+                    progress = if (download.fileSize > 0) download.downloadedSize.toFloat() / download.fileSize else 0f,
+                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                    color = Color(0xFF4CAF50),
+                    trackColor = Color.Gray.copy(alpha = 0.3f)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (progressMode == "PERCENT") {
+                            "${((if (download.fileSize > 0) download.downloadedSize.toFloat() / download.fileSize else 0f) * 100).toInt()}%"
+                        } else {
+                            "${formatFileSize(download.downloadedSize)} / ${formatFileSize(download.fileSize)}"
+                        },
+                        color = Color.Gray,
+                        fontSize = 12.sp
+                    )
+
+                    Row {
+                        if (showSpeed) {
+                            Text(
+                                text = "${if (speed > 0) formatFileSize(speed) else "0 KB"}/c",
+                                color = Color.Gray,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        if (showTime && remainingTime > 0) {
+                            Text(
+                                text = " • ${formatTime(remainingTime)}",
+                                color = Color.Gray,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            } else { // Завершенные или отмененные
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (download.status == DownloadStatus.COMPLETED) {
+                         Button(
+                            onClick = { downloadManager.openFile(download, context as? Activity) },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text("Открыть", fontSize = 12.sp)
+                        }
+                    } else {
+                        Text(
+                            text = when (download.status) {
+                                DownloadStatus.FAILED -> "Ошибка"
+                                DownloadStatus.CANCELLED -> "Отменено"
+                                else -> "Статус неизвестен"
+                            },
+                            color = if (download.status == DownloadStatus.FAILED) Color.Red.copy(alpha = 0.8f) else Color.Gray,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(onClick = {
+                        val action = { coroutineScope.launch { downloadManager.deleteFile(download) } }
+                        if (showConfirmation) {
+                            dialogTitle = "Удаление файла"
+                            dialogText = "Вы уверены, что хотите удалить этот файл? Это действие необратимо."
+                            confirmAction = action
+                            showDialog = true
+                        } else {
+                            action()
+                        }
+                    }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Удалить", tint = Color.Red.copy(alpha = 0.7f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun formatTime(seconds: Long): String {
+    val s = seconds % 60
+    val m = (seconds / 60) % 60
+    val h = seconds / 3600
+    return buildString {
+        if (h > 0) append("$h ч ")
+        if (m > 0) append("$m мин ")
+        append("$s сек")
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DownloadSettingsScreen(
+    settingsManager: SettingsManager,
+    onBack: () -> Unit,
+    onClose: () -> Unit
+) {
+    val showSpeed = settingsManager.showDownloadSpeedFlow.collectAsState()
+    val showTime = settingsManager.showRemainingTimeFlow.collectAsState()
+    val progressMode = settingsManager.progressDisplayModeFlow.collectAsState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121212))
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 36.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "Назад",
+                    tint = Color.White
+                )
+            }
+            Text(
+                text = "Настройки загрузок",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center
+            )
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
+                    tint = Color.White
+                )
+            }
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 100.dp)
+        ) {
+            item {
+                SettingSwitch(
+                    title = "Показывать скорость загрузки",
+                    description = "Отображать текущую скорость загрузки файла",
+                    checked = showSpeed.value,
+                    onCheckedChange = { settingsManager.setShowDownloadSpeed(it) }
+                )
+            }
+            item {
+                SettingSwitch(
+                    title = "Показывать время до конца",
+                    description = "Отображать оставшееся время загрузки",
+                    checked = showTime.value,
+                    onCheckedChange = { settingsManager.setShowRemainingTime(it) }
+                )
+            }
+            item {
+                Text(
+                    text = "Отображение прогресса",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 16.dp)
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = progressMode.value == "PERCENT",
+                        onClick = { settingsManager.setProgressDisplayMode("PERCENT") },
+                        colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF4CAF50))
+                    )
+                    Text("В процентах", color = Color.White)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    RadioButton(
+                        selected = progressMode.value == "MB",
+                        onClick = { settingsManager.setProgressDisplayMode("MB") },
+                        colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF4CAF50))
+                    )
+                    Text("В мегабайтах", color = Color.White)
+                }
+            }
+            item {
+                SettingSwitch(
+                    title = "Предупреждения",
+                    description = "Показывать диалог подтверждения при отмене или удалении загрузки",
+                    checked = settingsManager.showDownloadConfirmationFlow.collectAsState().value,
+                    onCheckedChange = { settingsManager.setShowDownloadConfirmation(it) }
+                )
+            }
         }
     }
 } 

@@ -23,6 +23,12 @@ class SettingsManager(context: Context) {
         private const val KEY_DOWNLOADED_UPDATE_VERSION = "downloaded_update_version"
         private const val KEY_DOWNLOADED_UPDATE_ID = "downloaded_update_id"
         private const val KEY_IGNORED_UPDATE_VERSION = "ignored_update_version"
+        private const val KEY_SHOW_DOWNLOAD_SPEED = "show_download_speed"
+        private const val KEY_SHOW_REMAINING_TIME = "show_remaining_time"
+        private const val KEY_PROGRESS_DISPLAY_MODE = "progress_display_mode"
+        private const val KEY_DOWNLOAD_NOTIFICATIONS = "download_notifications"
+        private const val KEY_AUTO_OPEN_DOWNLOADS = "auto_open_downloads"
+        private const val KEY_SHOW_DOWNLOAD_CONFIRMATION = "show_download_confirmation"
         const val DEVICE_TYPE_ANDROID = "android"
         const val DEVICE_TYPE_ANDROID_TV = "android_tv"
 
@@ -64,6 +70,11 @@ class SettingsManager(context: Context) {
     // StateFlow для отслеживания настройки отключения зума
     private val _disableZoomFlow = MutableStateFlow(isZoomDisabled())
     val disableZoomFlow: StateFlow<Boolean> = _disableZoomFlow.asStateFlow()
+    
+    val showDownloadSpeedFlow = MutableStateFlow(isShowDownloadSpeedEnabled())
+    val showRemainingTimeFlow = MutableStateFlow(isShowRemainingTimeEnabled())
+    val progressDisplayModeFlow = MutableStateFlow(getProgressDisplayMode())
+    val showDownloadConfirmationFlow = MutableStateFlow(isShowDownloadConfirmationEnabled())
     
     /**
      * Проверяет, установлен ли тип устройства
@@ -263,5 +274,64 @@ class SettingsManager(context: Context) {
 
     fun clearIgnoredUpdate() {
         prefs.edit().remove(KEY_IGNORED_UPDATE_VERSION).apply()
+    }
+
+    fun isShowDownloadSpeedEnabled(): Boolean = prefs.getBoolean(KEY_SHOW_DOWNLOAD_SPEED, true)
+    fun setShowDownloadSpeed(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_DOWNLOAD_SPEED, enabled).apply()
+        showDownloadSpeedFlow.value = enabled
+    }
+
+    fun isShowRemainingTimeEnabled(): Boolean = prefs.getBoolean(KEY_SHOW_REMAINING_TIME, true)
+    fun setShowRemainingTime(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_REMAINING_TIME, enabled).apply()
+        showRemainingTimeFlow.value = enabled
+    }
+
+    fun getProgressDisplayMode(): String = prefs.getString(KEY_PROGRESS_DISPLAY_MODE, "PERCENT") ?: "PERCENT"
+    fun setProgressDisplayMode(mode: String) {
+        prefs.edit().putString(KEY_PROGRESS_DISPLAY_MODE, mode).apply()
+        progressDisplayModeFlow.value = mode
+    }
+    
+    /**
+     * Возвращает статус уведомлений о загрузках
+     */
+    fun isDownloadNotificationsEnabled(): Boolean {
+        return prefs.getBoolean(KEY_DOWNLOAD_NOTIFICATIONS, true)
+    }
+    
+    /**
+     * Устанавливает статус уведомлений о загрузках
+     */
+    fun setDownloadNotifications(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_DOWNLOAD_NOTIFICATIONS, enabled).apply()
+    }
+    
+    /**
+     * Возвращает статус автоматического открытия загруженных файлов
+     */
+    fun isAutoOpenDownloadsEnabled(): Boolean {
+        return prefs.getBoolean(KEY_AUTO_OPEN_DOWNLOADS, false)
+    }
+    
+    /**
+     * Устанавливает статус автоматического открытия загруженных файлов
+     */
+    fun setAutoOpenDownloads(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_OPEN_DOWNLOADS, enabled).apply()
+    }
+    
+    /**
+     * Возвращает папку загрузок
+     */
+    fun getDownloadFolder(): String {
+        return "Downloads"
+    }
+
+    fun isShowDownloadConfirmationEnabled(): Boolean = prefs.getBoolean(KEY_SHOW_DOWNLOAD_CONFIRMATION, true)
+    fun setShowDownloadConfirmation(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_DOWNLOAD_CONFIRMATION, enabled).apply()
+        showDownloadConfirmationFlow.value = enabled
     }
 } 

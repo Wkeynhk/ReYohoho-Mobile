@@ -79,6 +79,25 @@ class AdBlockerJSInterface(private val context: Context) {
             Log.e(TAG, "Ошибка при открытии внешней ссылки: ${e.message}")
         }
     }
+    
+    @JavascriptInterface
+    fun enterPictureInPictureMode(widthStr: String = "16", heightStr: String = "9") {
+        try {
+            // Преобразуем строковые параметры в целые числа, с защитой от ошибок
+            val width = widthStr.toIntOrNull() ?: 16
+            val height = heightStr.toIntOrNull() ?: 9
+            
+            Log.d(TAG, "JS вызвал переход в режим PiP с соотношением $width:$height")
+            
+            // Поскольку JS-интерфейс вызывается в JS-потоке, но UI-операции должны выполняться в основном потоке
+            val activity = context as? MainActivity
+            activity?.runOnUiThread {
+                activity.enterPictureInPictureMode(width, height)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка при переходе в режим PiP из JS: ${e.message}")
+        }
+    }
 }
 
 /**
@@ -209,6 +228,54 @@ class CustomWebViewClient(
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
         val url = request?.url?.toString() ?: return false
         
+        // Всегда перехватываем загрузку видеофайлов и любых файлов для скачивания
+        if (url.endsWith(".mp4") || url.endsWith(".mkv") || url.endsWith(".avi") || 
+            url.endsWith(".mov") || url.endsWith(".wmv") || url.endsWith(".flv") ||
+            url.contains("download", ignoreCase = true)) {
+            
+            // Получаем название со страницы с помощью JS
+            view?.evaluateJavascript(
+                """
+                (function() {
+                    try {
+                        const strongs = Array.from(document.querySelectorAll('strong'));
+                        const titleStrong = strongs.find(s => s.textContent.trim().includes('Название:'));
+                        if (titleStrong && titleStrong.parentElement) {
+                            return titleStrong.parentElement.textContent.replace('Название:', '').trim();
+                        }
+                        // Попробуем найти заголовок h1 как запасной вариант
+                        const h1 = document.querySelector('h1');
+                        if (h1) {
+                            return h1.textContent.trim();
+                        }
+                    } catch (e) {
+                        return null;
+                    }
+                    return null;
+                })();
+                """.trimIndent()
+            ) { title ->
+                // title будет в кавычках, если не null, убираем их
+                val pageTitle = title?.removeSurrounding("\"")?.takeIf { it != "null" }
+                
+                try {
+                    val downloadManager = AppDownloadManager.getInstance(context)
+                    val userAgent = view.settings?.userAgentString
+                    downloadManager.downloadFile(url, userAgent, null, "video/mp4", pageTitle)
+                    (context as? Activity)?.runOnUiThread {
+                        Toast.makeText(context, "Загрузка файла начата", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Log.e("WebView", "Ошибка при загрузке файла: ${e}")
+                    (context as? Activity)?.runOnUiThread {
+                        Toast.makeText(context, "Ошибка загрузки: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            
+            return true
+        }
+        
         // Проверяем, является ли URL прямым файлом для скачивания
         if (url.endsWith(".mp4") || url.endsWith(".mkv") || url.endsWith(".avi") || 
             url.endsWith(".mov") || url.endsWith(".wmv") || url.endsWith(".flv")) {
@@ -256,14 +323,12 @@ class CustomWebViewClient(
                 context.startActivity(intent)
                 return true
             } catch (e: Exception) {
-                Log.e("WebView", "Ошибка при открытии внешней ссылки: ${e.message}")
+                Log.e("WebView", "Ошибка при открытии внешней ссылки: "+e.message)
             }
         }
         
-        // Для внутренних ссылок используем стандартное поведение
-        view?.loadUrl(url)
-        onUrlChanged(url)
-        return true
+        // Для внутренних ссылок используем стандартное поведение WebView (чтобы работала история)
+        return false
     }
     
     override fun shouldInterceptRequest(
@@ -299,6 +364,9 @@ class CustomWebViewClient(
         
         // Добавляем поддержку полноэкранного режима для видео
         injectFullscreenVideoSupport(view)
+        
+        // Добавляем поддержку Picture-in-Picture (PiP)
+        injectPipSupport(view)
         
         // Исправляем работу кнопки удаления истории
         injectDeleteHistoryButtonFix(view)
@@ -370,8 +438,12 @@ fun AdBlockWebView(
         }
     }
     
-    BackHandler(enabled = webView?.canGoBack() == true) {
-        webView?.goBack()
+    BackHandler {
+        if (webView?.canGoBack() == true) {
+            webView?.goBack()
+        } else {
+            (activity as? Activity)?.finish()
+        }
     }
     
     // Используем черный фон для корректного отображения в темной теме
@@ -430,7 +502,25 @@ fun AdBlockWebView(
                     webChromeClient = activity?.let { FullScreenWebChromeClient(it) } ?: FullScreenWebChromeClient(context as Activity)
                     
                     // Добавляем JavaScript интерфейс
-                    addJavascriptInterface(AdBlockerJSInterface(context), "Android")
+                    val adBlockerInterface = AdBlockerJSInterface(context)
+                    addJavascriptInterface(adBlockerInterface, "Android")
+                    addJavascriptInterface(adBlockerInterface, "NativeAdBlocker")
+                    
+                    // Регистрация интерфейса для обработки вызовов из плеера
+                    try {
+                        // Пытаемся получить доступ к MainActivity
+                        val mainActivity = context as? MainActivity
+                        if (mainActivity != null) {
+                            // Регистрируем саму активность как JavaScriptInterface для доступа к её методам
+                            addJavascriptInterface(mainActivity, "AndroidActivity")
+                            Log.d("WebView", "MainActivity успешно зарегистрирована как JavaScriptInterface")
+                        }
+                    } catch (e: Exception) {
+                        Log.e("WebView", "Ошибка при регистрации JavaScriptInterface для MainActivity: ${e.message}")
+                    }
+                    
+                    // Обработчик консольных сообщений
+                    // ... existing code ...
                     
                     // Загружаем URL
                     loadUrl(initialUrl)
@@ -458,12 +548,6 @@ fun AdBlockWebView(
                     injectPullToRefresh(view)
                 } else {
                     removePullToRefresh(view)
-                }
-                
-                // Принудительно обновляем URL если он изменился
-                val currentUrl = url
-                if (view.url != currentUrl && !currentUrl.isNullOrEmpty()) {
-                    view.loadUrl(currentUrl)
                 }
                 
                 // Принудительно применяем pull to refresh через небольшую задержку
@@ -2049,4 +2133,409 @@ private fun removePullToRefresh(webView: WebView) {
     """.trimIndent()
     
     webView.evaluateJavascript(removePullToRefreshJs, null)
+}
+
+/**
+ * Внедряет JavaScript для поддержки режима Picture-in-Picture
+ * Включая специальную поддержку для плеера Lumex
+ * 
+ * Как работает поддержка Lumex:
+ * 1. Распознаем плеер по селекторам #vjs_video_3 или .video-js
+ * 2. Находим кнопку PiP по специфическим селекторам для Lumex плеера
+ * 3. Ищем видеоэлемент с id #vjs_video_3_html5_api
+ * 4. При переходе в PiP режим:
+ *    - Активно ищем видео элементы по всей странице, включая iframe
+ *    - Подготавливаем видео к PiP (устанавливаем громкость, запускаем воспроизведение)
+ *    - Добавляем отслеживание состояния видео с передачей в MediaSession
+ * 5. Регистрируем JavaScriptInterface для обеспечения коммуникации JS-Android
+ */
+private fun injectPipSupport(webView: WebView) {
+    val pipSupportJS = """
+        (function() {
+            console.log('[PipHelper] Добавление улучшенной поддержки Picture-in-Picture режима');
+            
+            // Проверяем, что мы не уже добавили поддержку PiP
+            if (window.ReYoHoHoPipHelper) {
+                console.log('[PipHelper] Поддержка Picture-in-Picture уже добавлена');
+                return;
+            }
+            
+            // Проверяем, есть ли встроенная поддержка PiP в браузере
+            const hasBrowserPipSupport = document.pictureInPictureEnabled || 
+                                        !!document.querySelector('video')?.webkitSupportsPresentationMode;
+                                        
+            console.log('[PipHelper] Встроенная поддержка PiP обнаружена:', hasBrowserPipSupport);
+            
+            // Функция для эмуляции клика по кнопке PiP в различных плеерах
+            function findAndClickPipButton() {
+                console.log('[PipHelper] Поиск кнопки PiP в плеерах...');
+                
+                // Селекторы кнопок PiP, используемых в различных плеерах
+                const pipButtonSelectors = [
+                    // Специфические селекторы для Lumex плеера
+                    'button[class^="vjs-pip"]', 
+                    'button.vjs-pip-button',
+                    'button.vjs-picture-in-picture-control',
+                    'button[title*="картинка"]', 
+                    'button[aria-label*="Картинка"]',
+                    'button:has(svg[viewBox*="24"][data-id="pip"])',  
+                    
+                    // Общие селекторы PiP кнопок
+                    '[aria-label*="картинка в картинке"]',
+                    '[aria-label*="picture in picture"]', 
+                    '[aria-label*="pip"]',
+                    '[title*="картинка в картинке"]',
+                    '[title*="picture in picture"]',
+                    '[title*="pip"]',
+                    '[data-tooltip-content*="картинка в картинке"]',
+                    '[data-tooltip-content*="picture in picture"]',
+                    '[data-tooltip*="картинка в картинке"]',
+                    '[data-tooltip*="picture in picture"]',
+                    
+                    // Кнопки по классам и ID
+                    '.vjs-pip-button',
+                    '.ytp-pip-button',
+                    '.pip-button',
+                    '.picture-in-picture',
+                    '#pip-button',
+                    '[class*="pip"]',
+                    '[id*="pip"]',
+                    
+                    // Кнопки по содержимому иконок (SVG)
+                    'button:has(svg[viewBox*="24"][class*="pip"])',
+                    'button:has(path[d*="M21,3H3"])',
+                    'button:has(path[d*="M19 7h-8v6h8V7zm-2 4h-4V9h4v2z"])'
+                ];
+                
+                // Перебираем все возможные селекторы
+                for (const selector of pipButtonSelectors) {
+                    try {
+                        const pipButton = document.querySelector(selector);
+                        if (pipButton) {
+                            console.log('[PipHelper] Найдена кнопка PiP по селектору:', selector);
+                            pipButton.click();
+                            return true;
+                        }
+                    } catch (e) {
+                        console.log('[PipHelper] Ошибка при проверке селектора:', e);
+                    }
+                }
+                
+                return false;
+            }
+            
+            // Функция для использования встроенного API браузера для PiP
+            async function useNativePipAPI(video) {
+                if (!video) return false;
+                
+                try {
+                    // Проверяем поддержку стандартного PiP API
+                    if (document.pictureInPictureElement) {
+                        // Если видео уже в PiP режиме, выходим из него
+                        await document.exitPictureInPicture();
+                        return true;
+                    } else if (document.pictureInPictureEnabled && video.readyState > 0) {
+                        // Если поддерживается PiP и видео готово, входим в режим PiP
+                        await video.requestPictureInPicture();
+                        return true;
+                    }
+                    
+                    // Проверяем поддержку Safari/WebKit PiP
+                    if (video.webkitSupportsPresentationMode && 
+                        typeof video.webkitSetPresentationMode === 'function') {
+                        // Переключаем режим отображения между 'inline' и 'picture-in-picture'
+                        const currentMode = video.webkitPresentationMode;
+                        video.webkitSetPresentationMode(currentMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+                        return true;
+                    }
+                } catch (e) {
+                    console.log('[PipHelper] Ошибка при использовании нативного PiP API:', e);
+                }
+                
+                return false;
+            }
+            
+            // Основная функция для активации PiP
+            async function activatePipMode(videoWidth, videoHeight) {
+                console.log('[PipHelper] Активация режима PiP...');
+                let success = false;
+                
+                // Специальная обработка для плеера Lumex
+                if (document.querySelector('#vjs_video_3') || document.querySelector('.video-js')) {
+                    console.log('[PipHelper] Обнаружен плеер Lumex');
+                    
+                    // Находим кнопку PiP в Lumex плеере
+                    const lumexPipButton = document.querySelector('button.vjs-picture-in-picture-control') || 
+                                          document.querySelector('button.vjs-pip-button') ||
+                                          document.querySelector('button[aria-label="Картинка в картинке"]');
+                    
+                    if (lumexPipButton) {
+                        console.log('[PipHelper] Нажатие на кнопку PiP в Lumex плеере');
+                        lumexPipButton.click();
+                        return true;
+                    } else {
+                        // Если кнопка не найдена, пробуем активировать PiP через API для видео в Lumex плеере
+                        const lumexVideo = document.querySelector('#vjs_video_3_html5_api') || 
+                                          document.querySelector('.video-js video');
+                        
+                        if (lumexVideo) {
+                            console.log('[PipHelper] Используем API для видео в Lumex плеере');
+                            if (await useNativePipAPI(lumexVideo)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                
+                // 1. Сначала пробуем найти и нажать имеющуюся кнопку PiP
+                success = findAndClickPipButton();
+                if (success) {
+                    console.log('[PipHelper] PiP активирован через кнопку плеера');
+                    return true;
+                }
+                
+                // 2. Затем пробуем использовать нативное API браузера
+                const video = document.querySelector('video');
+                if (video) {
+                    success = await useNativePipAPI(video);
+                    if (success) {
+                        console.log('[PipHelper] PiP активирован через нативное API браузера');
+                        return true;
+                    }
+                    
+                    // Получаем соотношение сторон видео
+                    if (!videoWidth || !videoHeight) {
+                        if (video.videoWidth && video.videoHeight) {
+                            videoWidth = video.videoWidth;
+                            videoHeight = video.videoHeight;
+                        }
+                    }
+                }
+                
+                // 3. В крайнем случае, используем нативный API приложения
+                try {
+                    console.log('[PipHelper] Вызов нативного метода Android для PiP');
+                    Android.enterPictureInPictureMode(String(videoWidth || 16), String(videoHeight || 9));
+                    return true;
+                } catch (e) {
+                    console.log('[PipHelper] Ошибка при использовании Android PiP API:', e);
+                }
+                
+                return false;
+            }
+            
+            // Функция для добавления кнопки PiP к видео
+            function addPipButtonToVideos() {
+                const videos = document.querySelectorAll('video');
+                videos.forEach((video, index) => {
+                    // Проверяем, что мы еще не добавили кнопку к этому видео
+                    if (video.getAttribute('data-pip-button-added') !== 'true') {
+                        video.setAttribute('data-pip-button-added', 'true');
+                        
+                        // Создаем контейнер для кнопки PiP
+                        const pipButtonContainer = document.createElement('div');
+                        pipButtonContainer.style.cssText = `
+                            position: absolute;
+                            bottom: 10px;
+                            right: 10px;
+                            z-index: 9999;
+                            opacity: 0;
+                            transition: opacity 0.3s;
+                            background: rgba(0, 0, 0, 0.5);
+                            border-radius: 50%;
+                            width: 36px;
+                            height: 36px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            cursor: pointer;
+                        `;
+                        
+                        // Показываем кнопку при наведении
+                        video.addEventListener('mouseover', () => {
+                            pipButtonContainer.style.opacity = '1';
+                        });
+                        
+                        video.addEventListener('mouseout', () => {
+                            pipButtonContainer.style.opacity = '0';
+                        });
+                        
+                        // Создаем SVG иконку для кнопки PiP
+                        pipButtonContainer.innerHTML = `
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white">
+                                <path d="M19 7h-8v6h8V7zm-2 4h-4V9h4v2zm4-8H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16.01H3V4.99h18v14.02z"/>
+                            </svg>
+                        `;
+                        
+                        // Добавляем обработчик нажатия на кнопку
+                        pipButtonContainer.addEventListener('click', async (e) => {
+                            e.stopPropagation();
+                            console.log('[PipHelper] Нажата кнопка PiP');
+                            
+                            // Получаем пропорции видео
+                            const videoWidth = video.videoWidth || 16;
+                            const videoHeight = video.videoHeight || 9;
+                            
+                            await activatePipMode(videoWidth, videoHeight);
+                        });
+                        
+                        // Добавляем контейнер рядом с видео
+                        if (video.parentElement) {
+                            video.parentElement.style.position = 'relative';
+                            video.parentElement.appendChild(pipButtonContainer);
+                        }
+                    }
+                });
+            }
+            
+            // Поиск видео в iframe и проверка их для добавления кнопки PiP
+            function findIframedVideos() {
+                const iframes = document.querySelectorAll('iframe');
+                iframes.forEach(iframe => {
+                    try {
+                        // Пытаемся найти видео в iframe
+                        const iframeDocument = iframe.contentDocument || iframe.contentWindow?.document;
+                        if (iframeDocument) {
+                            const videos = iframeDocument.querySelectorAll('video');
+                            if (videos.length > 0) {
+                                console.log('[PipHelper] Найдено видео в iframe:', iframe.src);
+                            }
+                        }
+                    } catch (e) {
+                        // Ошибка при доступе к iframe из-за политики CORS
+                        console.log('[PipHelper] Невозможно получить доступ к iframe:', iframe.src);
+                    }
+                });
+            }
+            
+            // Добавляем слушатель для двойного нажатия на видео для активации PiP
+            function addDoubleTapToPipListener() {
+                const videos = document.querySelectorAll('video');
+                videos.forEach(video => {
+                    if (!video.getAttribute('data-pip-double-tap')) {
+                        video.setAttribute('data-pip-double-tap', 'true');
+                        
+                        let lastTap = 0;
+                        video.addEventListener('touchend', function(e) {
+                            const currentTime = new Date().getTime();
+                            const tapLength = currentTime - lastTap;
+                            if (tapLength < 500 && tapLength > 0) {
+                                e.preventDefault();
+                                activatePipMode(video.videoWidth, video.videoHeight);
+                            }
+                            lastTap = currentTime;
+                        });
+                    }
+                });
+            }
+            
+            // Инициализация обработки событий
+            function initPipHelper() {
+                // Запускаем добавление кнопок PiP
+                addPipButtonToVideos();
+                
+                // Запускаем поиск видео в iframe
+                findIframedVideos();
+                
+                // Добавляем слушатель для двойного нажатия
+                addDoubleTapToPipListener();
+                
+                // Добавляем двойную клавишу "p" для активации PiP
+                let lastPKeyTime = 0;
+                document.addEventListener('keydown', function(e) {
+                    if (e.key === 'p' || e.key === 'P' || e.keyCode === 80) {
+                        const currentTime = new Date().getTime();
+                        const keyDelay = currentTime - lastPKeyTime;
+                        if (keyDelay < 500 && keyDelay > 0) {
+                            console.log('[PipHelper] Обнаружено двойное нажатие P - активируем PiP');
+                            
+                            // Находим первое воспроизводящееся видео или просто первое видео
+                            const videos = Array.from(document.querySelectorAll('video'));
+                            const playingVideo = videos.find(v => !v.paused) || videos[0];
+                            
+                            if (playingVideo) {
+                                activatePipMode(playingVideo.videoWidth, playingVideo.videoHeight);
+                            } else {
+                                // Если видео не найдено, активируем PiP с пропорциями 16:9
+                                activatePipMode();
+                            }
+                        }
+                        lastPKeyTime = currentTime;
+                    }
+                });
+            }
+            
+            // Регулярное обновление для обработки асинхронно загружаемых видео
+            function scheduleUpdateChecks() {
+                // Начальная инициализация
+                initPipHelper();
+                
+                // Регулярные проверки
+                setTimeout(initPipHelper, 1000);
+                setTimeout(initPipHelper, 3000);
+                setTimeout(initPipHelper, 6000);
+                
+                // Наблюдатель за изменениями DOM для отслеживания новых видео
+                const observer = new MutationObserver((mutations) => {
+                    let videoAdded = false;
+                    mutations.forEach((mutation) => {
+                        if (mutation.addedNodes.length > 0) {
+                            mutation.addedNodes.forEach((node) => {
+                                // Проверяем, является ли добавленный узел видео или содержит видео
+                                if (node.nodeName === 'VIDEO' || 
+                                    (node.nodeType === Node.ELEMENT_NODE && node.querySelector('video'))) {
+                                    videoAdded = true;
+                                }
+                            });
+                        }
+                    });
+                    
+                    // Если добавлено новое видео, инициализируем PiP-хелпер
+                    if (videoAdded) {
+                        console.log('[PipHelper] Обнаружено новое видео - обновляем');
+                        initPipHelper();
+                    }
+                });
+                
+                // Запускаем наблюдатель
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true
+                });
+            }
+            
+            // Колбэки для обработки входа/выхода из режима PiP
+            function onEnterPipMode() {
+                console.log('[PipHelper] Приложение вошло в режим PiP');
+                // Можно добавить специфичную логику при переходе в PiP
+            }
+            
+            function onExitPipMode() {
+                console.log('[PipHelper] Приложение вышло из режима PiP');
+                // Можно добавить специфичную логику при выходе из PiP
+            }
+            
+            // Экспортируем функции в глобальную область
+            window.ReYoHoHoPipHelper = {
+                activatePipMode: activatePipMode,
+                onEnterPipMode: onEnterPipMode,
+                onExitPipMode: onExitPipMode,
+                addPipButtonToVideos: addPipButtonToVideos,
+                findAndClickPipButton: findAndClickPipButton
+            };
+            
+            // Запускаем планировщик проверок
+            scheduleUpdateChecks();
+            
+            console.log('[PipHelper] Поддержка Picture-in-Picture успешно добавлена');
+        })();
+    """.trimIndent()
+    
+    // Внедряем JavaScript в WebView
+    try {
+        webView.evaluateJavascript(pipSupportJS, null)
+        Log.d("PipHelper", "JavaScript для поддержки Picture-in-Picture успешно внедрен")
+    } catch (e: Exception) {
+        Log.e("PipHelper", "Ошибка при внедрении JavaScript для поддержки Picture-in-Picture: ${e.message}")
+    }
 }
