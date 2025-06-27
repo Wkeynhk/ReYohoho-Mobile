@@ -11,8 +11,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,6 +46,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Delete
 import android.app.DownloadManager
 import kotlinx.coroutines.delay
 import android.content.pm.PackageInstaller
@@ -59,8 +70,14 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.ui.draw.clip
 import kotlinx.coroutines.Job
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.draw.clip
 
 /**
  * Экран настроек приложения
@@ -184,7 +201,7 @@ fun MainSettingsScreen(
             item {
                 // Настройки сайта
                 SettingsItem(
-                    icon = Icons.Default.Info,
+                    icon = Icons.Default.Settings,
                     title = "Настройки сайта",
                     subtitle = "Зеркала, обновление, зум",
                     onClick = { onNavigateTo("site") }
@@ -200,7 +217,7 @@ fun MainSettingsScreen(
                 
                 // Кнопка перехода к загрузкам
                 SettingsItem(
-                    icon = Icons.Default.Info,
+                    icon = Icons.Default.Settings,
                     title = "Загрузки",
                     subtitle = "Смотреть активные и завершённые загрузки",
                     onClick = { onNavigateTo("downloads") }
@@ -208,7 +225,7 @@ fun MainSettingsScreen(
                 
                 // О приложении
                 SettingsItem(
-                    icon = Icons.Default.Info,
+                    icon = Icons.Default.Settings,
                     title = "О приложении",
                     subtitle = "Версия, автообновление, лицензия",
                     onClick = { onNavigateTo("about") }
@@ -380,49 +397,45 @@ fun SiteSettingsScreen(
             
             // Настройки блокировщика рекламы
             item {
-                Text(
-                    text = "Блокировщик рекламы",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 16.dp)
-                )
-            }
-            
-            item {
                 val context = LocalContext.current
                 val coroutineScope = rememberCoroutineScope()
-                var useLocalFile by remember { mutableStateOf(AdBlocker.isUsingLocalFile()) }
+                val settingsManager = SettingsManager.getInstance(context)
+                
+                var selectedSource by remember { 
+                    mutableStateOf(
+                        if (AdBlocker.isUsingLocalFile()) 
+                            SettingsManager.ADBLOCK_SOURCE_LOCAL 
+                        else 
+                            SettingsManager.ADBLOCK_SOURCE_INTERNET
+                    ) 
+                }
                 var domainsCount by remember { mutableStateOf(AdBlocker.getLoadedDomainsCount()) }
                 var isCheckingAvailability by remember { mutableStateOf(false) }
                 var internetAvailable by remember { mutableStateOf(false) }
                 var localFileAvailable by remember { mutableStateOf(AdBlocker.checkLocalFileAvailable(context)) }
+                var rememberChoice by remember { mutableStateOf(settingsManager.isAdblockRememberChoiceEnabled()) }
+                var showInternetInfo by remember { mutableStateOf(false) }
+                var showLocalInfo by remember { mutableStateOf(false) }
                 
                 // Проверяем доступность источников при загрузке
                 LaunchedEffect(Unit) {
                     isCheckingAvailability = true
                     internetAvailable = AdBlocker.checkInternetSourceAvailable()
                     localFileAvailable = AdBlocker.checkLocalFileAvailable(context)
-                    
-                    // Автоматически переключаемся на локальный файл, если интернет недоступен
-                    if (!internetAvailable && localFileAvailable && !useLocalFile) {
-                        useLocalFile = true
-                        AdBlocker.setUseLocalFile(true)
-                        coroutineScope.launch {
-                            try {
-                                AdBlocker.reloadDomains(context)
-                                domainsCount = AdBlocker.getLoadedDomainsCount()
-                            } catch (e: Exception) {
-                                Log.e("SettingsScreen", "Ошибка при перезагрузке доменов: ${e.message}")
-                            }
-                        }
-                    }
-                    
                     isCheckingAvailability = false
                 }
                 
                 Column {
-                    // Переключатель режима загрузки
+                    // Заголовок секции
+                    Text(
+                        text = "Блокировщик рекламы",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 24.dp, bottom = 16.dp)
+                    )
+                    
+                    // Настройка запоминания выбора
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -432,13 +445,13 @@ fun SiteSettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Использовать локальный файл",
+                                text = "Запоминать выбор источника",
                                 color = Color.White,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
-                                text = if (useLocalFile) "Загружает домены из встроенного файла" else "Загружает домены из интернета",
+                                text = "Выбор будет сохранен и использован при следующем запуске",
                                 color = Color.Gray,
                                 fontSize = 12.sp,
                                 modifier = Modifier.padding(top = 4.dp)
@@ -446,19 +459,10 @@ fun SiteSettingsScreen(
                         }
                         
                         Switch(
-                            checked = useLocalFile,
+                            checked = rememberChoice,
                             onCheckedChange = { newValue ->
-                                useLocalFile = newValue
-                                AdBlocker.setUseLocalFile(newValue)
-                                // Перезагружаем домены с новыми настройками
-                                coroutineScope.launch {
-                                    try {
-                                        AdBlocker.reloadDomains(context)
-                                        domainsCount = AdBlocker.getLoadedDomainsCount()
-                                    } catch (e: Exception) {
-                                        Log.e("SettingsScreen", "Ошибка при перезагрузке доменов: ${e.message}")
-                                    }
-                                }
+                                rememberChoice = newValue
+                                settingsManager.setAdblockRememberChoice(newValue)
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color(0xFF4CAF50),
@@ -469,7 +473,136 @@ fun SiteSettingsScreen(
                         )
                     }
                     
-                    // Информация о доступности источников
+                    // Выбор источника доменов
+                    Text(
+                        text = "Источник доменов для блокировки:",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                    )
+
+                    val segmentOptions = listOf("Интернет", "Локальный файл")
+                    val segmentDescriptions = listOf(
+                        "Актуальный список доменов из интернета",
+                        "Встроенный список доменов в приложении"
+                    )
+                    val infoDialogState = remember { mutableStateOf<String?>(null) }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .background(Color(0xFF23272F), shape = RoundedCornerShape(12.dp)),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        segmentOptions.forEachIndexed { idx, label ->
+                            val selected = (selectedSource == SettingsManager.ADBLOCK_SOURCE_INTERNET && idx == 0) ||
+                                    (selectedSource == SettingsManager.ADBLOCK_SOURCE_LOCAL && idx == 1)
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (selected) Color(0xFF22C55E) else Color.Transparent)
+                                    .clickable {
+                                        selectedSource = if (idx == 0) SettingsManager.ADBLOCK_SOURCE_INTERNET else SettingsManager.ADBLOCK_SOURCE_LOCAL
+                                        AdBlocker.setPreferredSource(context, idx == 1)
+                                        coroutineScope.launch {
+                                            try {
+                                                AdBlocker.reloadDomains(context)
+                                                domainsCount = AdBlocker.getLoadedDomainsCount()
+                                            } catch (e: Exception) {
+                                                Log.e("SettingsScreen", "Ошибка при перезагрузке доменов: ${e.message}")
+                                            }
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (selected) Color.White else Color.Gray,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 15.sp
+                                )
+                            }
+                            if (idx == 0) Divider(
+                                color = Color(0xFF23272F),
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .fillMaxHeight()
+                            )
+                        }
+                        // Иконка информации справа
+                        IconButton(
+                            onClick = {
+                                infoDialogState.value = "both"
+                            },
+                            modifier = Modifier.padding(end = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Info,
+                                contentDescription = "Подробнее",
+                                tint = Color(0xFF4CAF50),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    // Краткое описание выбранного варианта
+                    Text(
+                        text = if (selectedSource == SettingsManager.ADBLOCK_SOURCE_INTERNET) segmentDescriptions[0] else segmentDescriptions[1],
+                        color = Color.Gray,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
+                    )
+
+                    // Диалог подробной информации
+                    if (infoDialogState.value != null) {
+                        AlertDialog(
+                            onDismissRequest = { infoDialogState.value = null },
+                            confirmButton = {
+                                TextButton(onClick = { infoDialogState.value = null }) {
+                                    Text("ОК")
+                                }
+                            },
+                            title = {
+                                Text(
+                                    text = "Источники доменов для блокировки",
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            text = {
+                                Column {
+                                    Text(
+                                        text = "Интернет-источник (EasyList):",
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(bottom = 4.dp)
+                                    )
+                                    Text(
+                                        text = "• Загружает актуальный список доменов из интернета\n" +
+                                            "• Требует подключения к интернету\n" +
+                                            "• Содержит больше доменов для блокировки\n" +
+                                            "• Может быть медленнее при загрузке",
+                                        modifier = Modifier.padding(bottom = 12.dp)
+                                    )
+                                    
+                                    Text(
+                                        text = "Локальный файл:",
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(bottom = 4.dp)
+                                    )
+                                    Text(
+                                        text = "• Использует встроенный список доменов\n" +
+                                            "• Работает без интернета\n" +
+                                            "• Быстрая загрузка\n" +
+                                            "• Меньше доменов, но стабильная работа"
+                                    )
+                                }
+                            }
+                        )
+                    }
+                    
+                    // Индикатор загрузки
                     if (isCheckingAvailability) {
                         Row(
                             modifier = Modifier.padding(vertical = 8.dp),
@@ -487,39 +620,6 @@ fun SiteSettingsScreen(
                                 fontSize = 12.sp
                             )
                         }
-                    } else {
-                        Row(
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = "Интернет",
-                                tint = if (internetAvailable) Color.Green else Color.Red,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Интернет: ${if (internetAvailable) "доступен" else "недоступен"}",
-                                color = Color.Gray,
-                                fontSize = 12.sp
-                            )
-                            
-                            Spacer(modifier = Modifier.width(16.dp))
-                            
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = "Локальный файл",
-                                tint = if (localFileAvailable) Color.Green else Color.Red,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Локальный файл: ${if (localFileAvailable) "доступен" else "недоступен"}",
-                                color = Color.Gray,
-                                fontSize = 12.sp
-                            )
-                        }
                     }
                     
                     // Количество загруженных доменов
@@ -530,7 +630,7 @@ fun SiteSettingsScreen(
                         Icon(
                             imageVector = Icons.Default.Info,
                             contentDescription = "Домены",
-                            tint = Color.Blue,
+                            tint = Color(0xFF4CAF50),
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))

@@ -159,6 +159,19 @@ class FullScreenWebChromeClient(private val activity: Activity) : WebChromeClien
                 or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
             )
             
+            // --- Исправление: повторное скрытие системных панелей при возврате фокуса ---
+            view.setOnSystemUiVisibilityChangeListener {
+                activity.window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or View.SYSTEM_UI_FLAG_FULLSCREEN
+                    or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                )
+            }
+            // --- конец исправления ---
+            
             // Устанавливаем ориентацию на альбомную для видео
             activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             
@@ -217,6 +230,8 @@ class FullScreenWebChromeClient(private val activity: Activity) : WebChromeClien
         frameLayout.setBackgroundColor(Color.BLACK)
         return frameLayout
     }
+    
+    fun isInFullScreen(): Boolean = mCustomView != null
 }
 
 class CustomWebViewClient(
@@ -499,7 +514,11 @@ fun AdBlockWebView(
                     )
                     
                     // Настройка обработки полноэкранного режима
-                    webChromeClient = activity?.let { FullScreenWebChromeClient(it) } ?: FullScreenWebChromeClient(context as Activity)
+                    val chromeClient = activity?.let { FullScreenWebChromeClient(it) } ?: FullScreenWebChromeClient(context as Activity)
+                    webChromeClient = chromeClient
+                    if (activity is MainActivity) {
+                        activity.fullScreenWebChromeClient = chromeClient
+                    }
                     
                     // Добавляем JavaScript интерфейс
                     val adBlockerInterface = AdBlockerJSInterface(context)

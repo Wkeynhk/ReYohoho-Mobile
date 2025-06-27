@@ -131,6 +131,8 @@ class MainActivity : ComponentActivity() {
     // Медиа-сессия для улучшения PiP режима
     private var mediaSession: MediaSession? = null
     
+    var fullScreenWebChromeClient: FullScreenWebChromeClient? = null
+    
     @SuppressLint("InlinedApi")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -389,13 +391,13 @@ class MainActivity : ComponentActivity() {
     }
     
     /**
-     * Инициализация блокировщика рекламы при запуске приложения
+     * Инициализация блокировщика рекламы
      */
     private fun initializeAdBlocker() {
         lifecycleScope.launch {
             try {
                 Log.d(TAG, "Начинаем инициализацию блокировщика рекламы...")
-                AdBlocker.initialize(this@MainActivity)
+                AdBlocker.initializeWithSettings(this@MainActivity)
                 Log.d(TAG, "Блокировщик рекламы успешно инициализирован")
             } catch (e: Exception) {
                 Log.e(TAG, "Ошибка при инициализации блокировщика рекламы: ${e.message}")
@@ -491,6 +493,10 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
+            if (fullScreenWebChromeClient?.isInFullScreen() == true) {
+                // Не трогаем системные панели, плеер сам их скроет
+                return
+            }
             setupImmersiveMode()
         }
     }

@@ -121,6 +121,53 @@ class AdBlocker {
         }
         
         /**
+         * Инициализация с учетом сохраненных настроек
+         */
+        suspend fun initializeWithSettings(context: Context) {
+            val settingsManager = com.example.reyohoho.ui.SettingsManager.getInstance(context)
+            
+            if (settingsManager.isAdblockRememberChoiceEnabled()) {
+                // Если включено запоминание выбора, используем сохраненный источник
+                val preferredSource = settingsManager.getAdblockPreferredSource()
+                useLocalFile = (preferredSource == com.example.reyohoho.ui.SettingsManager.ADBLOCK_SOURCE_LOCAL)
+                Log.d(TAG, "Используем сохраненный источник: $preferredSource")
+            } else {
+                // Если запоминание отключено, проверяем доступность источников
+                val internetAvailable = checkInternetSourceAvailable()
+                val localAvailable = checkLocalFileAvailable(context)
+                
+                if (internetAvailable) {
+                    useLocalFile = false
+                    Log.d(TAG, "Интернет доступен, используем онлайн-источник")
+                } else if (localAvailable) {
+                    useLocalFile = true
+                    Log.d(TAG, "Интернет недоступен, используем локальный файл")
+                } else {
+                    useLocalFile = false
+                    Log.w(TAG, "Оба источника недоступны, используем резервный список")
+                }
+            }
+            
+            initialize(context)
+        }
+        
+        /**
+         * Установка предпочтительного источника с сохранением в настройках
+         */
+        fun setPreferredSource(context: Context, useLocal: Boolean) {
+            val settingsManager = com.example.reyohoho.ui.SettingsManager.getInstance(context)
+            val source = if (useLocal) {
+                com.example.reyohoho.ui.SettingsManager.ADBLOCK_SOURCE_LOCAL
+            } else {
+                com.example.reyohoho.ui.SettingsManager.ADBLOCK_SOURCE_INTERNET
+            }
+            
+            settingsManager.setAdblockPreferredSource(source)
+            setUseLocalFile(useLocal)
+            Log.d(TAG, "Установлен предпочтительный источник: $source")
+        }
+        
+        /**
          * Проверка доступности интернет-источника
          */
         suspend fun checkInternetSourceAvailable(): Boolean {

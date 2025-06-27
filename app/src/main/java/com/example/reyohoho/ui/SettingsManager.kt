@@ -29,8 +29,12 @@ class SettingsManager(context: Context) {
         private const val KEY_DOWNLOAD_NOTIFICATIONS = "download_notifications"
         private const val KEY_AUTO_OPEN_DOWNLOADS = "auto_open_downloads"
         private const val KEY_SHOW_DOWNLOAD_CONFIRMATION = "show_download_confirmation"
+        private const val KEY_ADBLOCK_REMEMBER_CHOICE = "adblock_remember_choice"
+        private const val KEY_ADBLOCK_PREFERRED_SOURCE = "adblock_preferred_source"
         const val DEVICE_TYPE_ANDROID = "android"
         const val DEVICE_TYPE_ANDROID_TV = "android_tv"
+        const val ADBLOCK_SOURCE_INTERNET = "internet"
+        const val ADBLOCK_SOURCE_LOCAL = "local"
 
         // Синглтон для доступа к настройкам из любой части приложения
         @Volatile
@@ -333,5 +337,15 @@ class SettingsManager(context: Context) {
     fun setShowDownloadConfirmation(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_SHOW_DOWNLOAD_CONFIRMATION, enabled).apply()
         showDownloadConfirmationFlow.value = enabled
+    }
+
+    fun isAdblockRememberChoiceEnabled(): Boolean = prefs.getBoolean(KEY_ADBLOCK_REMEMBER_CHOICE, false)
+    fun setAdblockRememberChoice(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_ADBLOCK_REMEMBER_CHOICE, enabled).apply()
+    }
+
+    fun getAdblockPreferredSource(): String = prefs.getString(KEY_ADBLOCK_PREFERRED_SOURCE, ADBLOCK_SOURCE_INTERNET) ?: ADBLOCK_SOURCE_INTERNET
+    fun setAdblockPreferredSource(source: String) {
+        prefs.edit().putString(KEY_ADBLOCK_PREFERRED_SOURCE, source).apply()
     }
 } 
