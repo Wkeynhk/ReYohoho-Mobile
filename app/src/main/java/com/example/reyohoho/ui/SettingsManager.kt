@@ -31,6 +31,8 @@ class SettingsManager(context: Context) {
         private const val KEY_SHOW_DOWNLOAD_CONFIRMATION = "show_download_confirmation"
         private const val KEY_ADBLOCK_REMEMBER_CHOICE = "adblock_remember_choice"
         private const val KEY_ADBLOCK_PREFERRED_SOURCE = "adblock_preferred_source"
+        private const val KEY_LOAD_ON_MAIN_PAGE = "load_on_main_page"
+        private const val KEY_SHOW_SETTINGS_BUTTON_ONLY_ON_SETTINGS_PAGE = "show_settings_button_only_on_settings_page"
         const val DEVICE_TYPE_ANDROID = "android"
         const val DEVICE_TYPE_ANDROID_TV = "android_tv"
         const val ADBLOCK_SOURCE_INTERNET = "internet"
@@ -79,6 +81,14 @@ class SettingsManager(context: Context) {
     val showRemainingTimeFlow = MutableStateFlow(isShowRemainingTimeEnabled())
     val progressDisplayModeFlow = MutableStateFlow(getProgressDisplayMode())
     val showDownloadConfirmationFlow = MutableStateFlow(isShowDownloadConfirmationEnabled())
+    
+    // StateFlow для отслеживания настройки загрузки на главную страницу
+    private val _loadOnMainPageFlow = MutableStateFlow(isLoadOnMainPageEnabled())
+    val loadOnMainPageFlow: StateFlow<Boolean> = _loadOnMainPageFlow.asStateFlow()
+    
+    // StateFlow для отслеживания настройки показа кнопки настроек
+    private val _showSettingsButtonOnlyOnSettingsPageFlow = MutableStateFlow(isShowSettingsButtonOnlyOnSettingsPageEnabled())
+    val showSettingsButtonOnlyOnSettingsPageFlow: StateFlow<Boolean> = _showSettingsButtonOnlyOnSettingsPageFlow.asStateFlow()
     
     /**
      * Проверяет, установлен ли тип устройства
@@ -347,5 +357,53 @@ class SettingsManager(context: Context) {
     fun getAdblockPreferredSource(): String = prefs.getString(KEY_ADBLOCK_PREFERRED_SOURCE, ADBLOCK_SOURCE_INTERNET) ?: ADBLOCK_SOURCE_INTERNET
     fun setAdblockPreferredSource(source: String) {
         prefs.edit().putString(KEY_ADBLOCK_PREFERRED_SOURCE, source).apply()
+    }
+    
+    /**
+     * Возвращает статус настройки загрузки на главную страницу
+     */
+    fun isLoadOnMainPageEnabled(): Boolean {
+        return prefs.getBoolean(KEY_LOAD_ON_MAIN_PAGE, false)
+    }
+    
+    /**
+     * Устанавливает статус настройки загрузки на главную страницу
+     */
+    fun setLoadOnMainPage(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_LOAD_ON_MAIN_PAGE, enabled).apply()
+        _loadOnMainPageFlow.value = enabled
+    }
+    
+    /**
+     * Переключает настройку загрузки на главную страницу
+     */
+    fun toggleLoadOnMainPage(): Boolean {
+        val newValue = !isLoadOnMainPageEnabled()
+        setLoadOnMainPage(newValue)
+        return newValue
+    }
+    
+    /**
+     * Возвращает статус настройки показа кнопки настроек только на странице настроек
+     */
+    fun isShowSettingsButtonOnlyOnSettingsPageEnabled(): Boolean {
+        return prefs.getBoolean(KEY_SHOW_SETTINGS_BUTTON_ONLY_ON_SETTINGS_PAGE, false)
+    }
+    
+    /**
+     * Устанавливает статус настройки показа кнопки настроек только на странице настроек
+     */
+    fun setShowSettingsButtonOnlyOnSettingsPage(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_SETTINGS_BUTTON_ONLY_ON_SETTINGS_PAGE, enabled).apply()
+        _showSettingsButtonOnlyOnSettingsPageFlow.value = enabled
+    }
+    
+    /**
+     * Переключает настройку показа кнопки настроек только на странице настроек
+     */
+    fun toggleShowSettingsButtonOnlyOnSettingsPage(): Boolean {
+        val newValue = !isShowSettingsButtonOnlyOnSettingsPageEnabled()
+        setShowSettingsButtonOnlyOnSettingsPage(newValue)
+        return newValue
     }
 } 

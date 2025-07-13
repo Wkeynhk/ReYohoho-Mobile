@@ -215,6 +215,7 @@ class MainActivity : ComponentActivity() {
                     
                     // Используем простой подход - храним WebView в состоянии
                     var webView by remember { mutableStateOf<WebView?>(null) }
+                    var currentWebViewUrl by remember { mutableStateOf("") }
                     
                     // Функция для обновления страницы
                     val refreshPage: () -> Unit = {
@@ -224,6 +225,7 @@ class MainActivity : ComponentActivity() {
                     
                     // Следим за изменениями зеркала сайта
                     val selectedMirror by settingsManager.siteMirrorFlow.collectAsState()
+                    val showSettingsButtonOnlyOnSettingsPage by settingsManager.showSettingsButtonOnlyOnSettingsPageFlow.collectAsState()
                     var currentUrl by remember { mutableStateOf(finalUrl) }
                     
                     // Обновляем URL при изменении зеркала
@@ -269,14 +271,17 @@ class MainActivity : ComponentActivity() {
                                 color = MaterialTheme.colorScheme.background
                             ) {
                                 // WebView всегда отображается под экраном настроек
-                                AdBlockWebView(
-                                    url = currentUrl,
-                                    settingsManager = settingsManager,
-                                    onWebViewCreated = { 
-                                        webView = it
-                                        currentWebView = it
-                                    }
-                                )
+                                                                    AdBlockWebView(
+                                        url = currentUrl,
+                                        settingsManager = settingsManager,
+                                        onWebViewCreated = { 
+                                            webView = it
+                                            currentWebView = it
+                                        },
+                                        onUrlChanged = { url ->
+                                            currentWebViewUrl = url
+                                        }
+                                    )
                             }
                             
                             // Если показываем настройки, отображаем их поверх WebView
@@ -296,7 +301,15 @@ class MainActivity : ComponentActivity() {
                             }
                             
                         // Кнопка настроек в правом нижнем углу
-                        if (!showSettings && !showDeviceTypeSelection && !showTVCursorPrompt) {
+                        val showSettingsButton = if (settingsManager.isShowSettingsButtonOnlyOnSettingsPageEnabled()) {
+                            // Если включена настройка "только на /settings", проверяем текущий URL
+                            currentWebViewUrl.contains("/settings")
+                        } else {
+                            // Если настройка выключена, показываем всегда
+                            true
+                        }
+                        
+                        if (!showSettings && !showDeviceTypeSelection && !showTVCursorPrompt && showSettingsButton) {
                             Column(
                                     modifier = Modifier
                                         .fillMaxSize()

@@ -366,13 +366,17 @@ class CustomWebViewClient(
     override fun onPageStarted(view: WebView, loadUrl: String, favicon: Bitmap?) {
         super.onPageStarted(view, loadUrl, favicon)
         Log.d("AdBlocker", "Загрузка страницы: $loadUrl")
-        onUrlChanged(loadUrl)
+        // Не сохраняем URL здесь, чтобы избежать сохранения редиректов
     }
     
     override fun onPageFinished(view: WebView, loadUrl: String) {
         super.onPageFinished(view, loadUrl)
         onPageFinished()
         Log.d("AdBlocker", "Страница загружена: $loadUrl")
+        
+        // Сохраняем текущий URL страницы (может отличаться от loadUrl из-за редиректов)
+        val currentUrl = view.url ?: loadUrl
+        onUrlChanged(currentUrl)
         
         // Применяем блокировщик рекламы
         injectRussianAdBlocker(view)
@@ -420,16 +424,25 @@ fun AdBlockWebView(
     // Получаем SharedPreferences для сохранения URL
     val prefs = remember { context.getSharedPreferences("WebViewPrefs", Context.MODE_PRIVATE) }
     
-    // Загружаем последний сохраненный URL или используем переданный
-    val initialUrl = remember { prefs.getString("last_url", url) ?: url }
-    
-    val settingsManagerInstance = settingsManager ?: remember { 
+    val settingsManagerInstance = settingsManager ?: remember {
         try {
             SettingsManager.getInstance(context)
         } catch (e: Exception) {
-            Log.e("AdBlockWebView", "Ошибка получения SettingsManager: ${e.message}")
+            Log.e("AdBlockWebView", "Ошибка получения SettingsManager: ", e)
             null
         }
+    }
+    
+    // Состояние настройки загрузки на главную страницу
+    val loadOnMainPage = settingsManagerInstance?.loadOnMainPageFlow?.collectAsState()
+    
+    // Определяем URL для загрузки
+    val urlToLoad = if (loadOnMainPage?.value == true) {
+        // Если включен переключатель "Загружать на последней странице", используем последний сохраненный URL
+        prefs.getString("last_url", url) ?: url
+    } else {
+        // Если выключен, всегда загружаем главную страницу зеркала
+        url
     }
     
     // Состояние удаления отступа сверху
@@ -542,7 +555,7 @@ fun AdBlockWebView(
                     // ... existing code ...
                     
                     // Загружаем URL
-                    loadUrl(initialUrl)
+                    loadUrl(urlToLoad)
                     
                     // Сохраняем ссылку на WebView
                 }.also { webView = it }
@@ -574,6 +587,11 @@ fun AdBlockWebView(
                     view.postDelayed({
                         injectPullToRefresh(view)
                     }, 500)
+                }
+                
+                // Если изменился urlToLoad, и он отличается от текущего, загружаем его
+                if (view.url != urlToLoad) {
+                    view.loadUrl(urlToLoad)
                 }
             },
             modifier = Modifier.fillMaxSize()

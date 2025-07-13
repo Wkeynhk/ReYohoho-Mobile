@@ -249,6 +249,7 @@ fun SiteSettingsScreen(
     val selectedMirror = settingsManager.siteMirrorFlow.collectAsState()
     val pullToRefresh = settingsManager.pullToRefreshFlow.collectAsState()
     val disableZoom = settingsManager.disableZoomFlow.collectAsState()
+    val loadOnMainPage = settingsManager.loadOnMainPageFlow.collectAsState()
     
     // Получаем список всех зеркал
     val allMirrors = settingsManager.getAllMirrors()
@@ -392,6 +393,15 @@ fun SiteSettingsScreen(
                     description = "Запретить масштабирование страницы",
                     checked = disableZoom.value,
                     onCheckedChange = { settingsManager.toggleDisableZoom() }
+                )
+            }
+            
+            item {
+                SettingSwitch(
+                    title = "Загружать на последней странице",
+                    description = "Загружаться на последней посещённой странице вместо главной",
+                    checked = loadOnMainPage.value,
+                    onCheckedChange = { settingsManager.toggleLoadOnMainPage() }
                 )
             }
             
@@ -803,6 +813,7 @@ fun AppearanceSettingsScreen(
 ) {
     val removeTopSpacing = settingsManager.removeTopSpacingFlow.collectAsState()
     val fullscreenMode = settingsManager.fullscreenModeFlow.collectAsState()
+    val showSettingsButtonOnlyOnSettingsPage = settingsManager.showSettingsButtonOnlyOnSettingsPageFlow.collectAsState()
     val context = LocalContext.current
     
     // Отслеживаем изменение настройки полноэкранного режима
@@ -879,6 +890,14 @@ fun AppearanceSettingsScreen(
                     description = "Скрыть системные панели для более комфортного просмотра",
                     checked = fullscreenMode.value,
                     onCheckedChange = { settingsManager.toggleFullscreenMode() }
+                )
+                
+                // Настройка показа кнопки настроек
+                SettingSwitch(
+                    title = "Кнопка настроек только на странице настроек",
+                    description = "Показывать кнопку настроек только на странице настроек сайта",
+                    checked = showSettingsButtonOnlyOnSettingsPage.value,
+                    onCheckedChange = { settingsManager.toggleShowSettingsButtonOnlyOnSettingsPage() }
                 )
             }
         }
