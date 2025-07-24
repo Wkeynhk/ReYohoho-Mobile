@@ -94,6 +94,16 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.webkit.JavascriptInterface
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.viewinterop.AndroidView
+import android.webkit.WebViewClient
+import android.view.ViewGroup
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.Dispatchers
+import com.example.reyohoho.ui.TorrServeManager
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -195,15 +205,14 @@ class MainActivity : ComponentActivity() {
             val finalUrl = urlToLoad ?: settingsManager.getSiteMirror()
             Log.d(TAG, "Загружаем URL: $finalUrl")
             
-            val appVersion = try {
-                packageManager.getPackageInfo(packageName, 0).versionName ?: "3.2"
-            } catch (e: Exception) {
-                "3.2" // fallback версия
-            }
+            val appVersion = "3.3"
             
             setContent {
                 // Всегда используем темную тему независимо от настроек системы
                 ReYohohoTheme(darkTheme = true) {
+                    var showJacredDialog by remember { mutableStateOf(false) }
+                    var jacredKpId by remember { mutableStateOf("") }
+                    
                     // Состояние для отображения настроек
                     var showSettings by remember { mutableStateOf(false) }
                     
@@ -308,33 +317,78 @@ class MainActivity : ComponentActivity() {
                             // Если настройка выключена, показываем всегда
                             true
                         }
+                        // --- ДОБАВЛЕНО: Кнопка торрента ---
+                        // Проверяем, что это страница фильма: /movie/ и цифры
+                        val movieIdRegex = Regex("/movie/(\\d+)")
+                        val match = movieIdRegex.find(currentWebViewUrl)
+                        val showTorrentButton = match != null
+                        val kpId = match?.groupValues?.getOrNull(1)
                         
-                        if (!showSettings && !showDeviceTypeSelection && !showTVCursorPrompt && showSettingsButton) {
-                            Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                    .padding(end = 16.dp, bottom = 80.dp),
-                                verticalArrangement = Arrangement.Bottom,
-                                horizontalAlignment = Alignment.End
-                                ) {
-                                    Button(
-                                        onClick = { showSettings = true },
+                        val settingsButtonPadding = settingsManager.settingsButtonPaddingFlow.collectAsState().value
+                        val torrentButtonPadding = settingsManager.torrentButtonPaddingFlow.collectAsState().value
+                        val torrentsEnabled = settingsManager.torrentsEnabledFlow.collectAsState().value
+                        val screenWidth = LocalContext.current.resources.displayMetrics.widthPixels
+                        val screenHeight = LocalContext.current.resources.displayMetrics.heightPixels
+                        // Кнопка торрентов
+                        if (torrentsEnabled && !showSettings && !showDeviceTypeSelection && !showTVCursorPrompt && showTorrentButton && kpId != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(end = torrentButtonPadding.first.dp, bottom = torrentButtonPadding.second.dp),
+                                contentAlignment = Alignment.BottomEnd
+                            ) {
+                                Button(
+                                    onClick = {
+                                        showJacredDialog = true
+                                        jacredKpId = kpId
+                                    },
                                     modifier = Modifier.size(56.dp),
-                                        shape = CircleShape,
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = Color.Black,
-                                            contentColor = Color.White
-                                        ),
-                                        contentPadding = PaddingValues(0.dp)
-                                    ) {
+                                    shape = CircleShape,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.Black,
+                                        contentColor = Color.White
+                                    ),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Торрент",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                            }
+                        }
+                        // Кнопка настроек всегда в одном месте, кроме экрана настроек
+                        if (!showSettings && !showDeviceTypeSelection && !showTVCursorPrompt && showSettingsButton) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(end = settingsButtonPadding.first.dp, bottom = settingsButtonPadding.second.dp),
+                                contentAlignment = Alignment.BottomEnd
+                            ) {
+                                Button(
+                                    onClick = { showSettings = true },
+                                    modifier = Modifier.size(56.dp),
+                                    shape = CircleShape,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.Black,
+                                        contentColor = Color.White
+                                    ),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
                                     Icon(
                                         imageVector = Icons.Default.Settings,
                                         contentDescription = "Настройки",
                                         tint = Color.White,
                                         modifier = Modifier.size(28.dp)
-                                        )
+                                    )
                                 }
                             }
+                        }
+                        // JacredScreen поверх всего
+                        if (torrentsEnabled && showJacredDialog && jacredKpId.isNotEmpty()) {
+                            JacredScreen(kpId = jacredKpId, onClose = { showJacredDialog = false }, settingsManager = settingsManager)
                         }
                     }
                 }
@@ -518,10 +572,16 @@ class MainActivity : ComponentActivity() {
      * Вызывается при уничтожении активности
      */
     override fun onDestroy() {
-        // Освобождаем MediaSession
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        super.onDestroy()
+        
+        // TorrServeManager при закрытии приложения не требует специальной очистки
+        // Т.к. используется только внешний TorrServe
+        
+        // Закрываем MediaSession
+        try {
             mediaSession?.release()
-            mediaSession = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка при закрытии MediaSession: ${e.message}")
         }
         
         // Сохраняем cookie перед закрытием приложения
@@ -530,8 +590,6 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Ошибка при сохранении cookie: ${e.message}")
         }
-        
-        super.onDestroy()
     }
 
     private fun startUpdateDownload(context: Context) {
@@ -1213,6 +1271,189 @@ fun TVCursorPromptScreen(
                     textAlign = TextAlign.Center
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun JacredScreen(
+    kpId: String,
+    onClose: () -> Unit,
+    settingsManager: SettingsManager
+) {
+    val context = LocalContext.current
+    val disableZoom = settingsManager.disableZoomFlow.collectAsState().value
+    val torrServeManager = remember { TorrServeManager.getInstance(context) }
+    val coroutineScope = rememberCoroutineScope()
+    var webView by remember { mutableStateOf<WebView?>(null) }
+    var urlLoaded by remember { mutableStateOf(false) }
+
+    // BackHandler для jacred
+    BackHandler(enabled = true) { onClose() }
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        // WebView
+        AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    webView = this
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.databaseEnabled = true
+                    settings.setSupportZoom(!disableZoom)
+                    settings.builtInZoomControls = !disableZoom
+                    settings.displayZoomControls = false
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = true
+                    setInitialScale(100)
+                    loadUrl("https://jacred.xyz/")
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            if (!urlLoaded) {
+                                urlLoaded = true
+                                view?.evaluateJavascript("document.getElementById('s').value = 'kp$kpId'; document.getElementById('submitButton').click();", null)
+                            }
+
+                            // Добавляем JavaScript для добавления кнопки "Смотреть" к результатам
+                            view?.evaluateJavascript("""
+                                (function() {
+                                    // Функция для добавления кнопок к результатам
+                                    function addWatchButtons() {
+                                        // Находим все результаты с магнет-ссылками
+                                        const results = document.querySelectorAll('.webResult');
+                                        
+                                        results.forEach(result => {
+                                            // Проверяем, есть ли уже кнопка "Смотреть"
+                                            if (result.querySelector('.watch-button')) {
+                                                return;
+                                            }
+                                            
+                                            // Находим магнет-ссылку
+                                            const magnetLink = result.querySelector('.magneto');
+                                            if (!magnetLink || !magnetLink.href || !magnetLink.href.startsWith('magnet:')) {
+                                                return;
+                                            }
+                                            
+                                            // Находим блок с размером для позиционирования кнопки
+                                            const sizeElement = result.querySelector('.size');
+                                            if (!sizeElement) {
+                                                return;
+                                            }
+                                            
+                                            // Создаем кнопку "Смотреть"
+                                            const watchButton = document.createElement('a');
+                                            watchButton.className = 'watch-button';
+                                            watchButton.href = '#';
+                                            watchButton.textContent = 'Смотреть';
+                                            watchButton.style.marginRight = '10px';
+                                            watchButton.style.color = '#4CAF50';
+                                            watchButton.style.fontWeight = 'bold';
+                                            
+                                            // Добавляем обработчик события клика
+                                            watchButton.onclick = function(e) {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                
+                                                // Передаем магнет-ссылку в Android
+                                                if (window.Android) {
+                                                    window.Android.addMagnetToTorrServe(magnetLink.href);
+                                                }
+                                                
+                                                return false;
+                                            };
+                                            
+                                            // Вставляем кнопку перед элементом размера
+                                            sizeElement.parentNode.insertBefore(watchButton, sizeElement);
+                                        });
+                                    }
+                                    
+                                    // Запускаем функцию сразу
+                                    addWatchButtons();
+                                    
+                                    // И через интервал, так как результаты могут загружаться асинхронно
+                                    setInterval(addWatchButtons, 1000);
+                                    
+                                    // Стили для кнопки
+                                    const style = document.createElement('style');
+                                    style.textContent = `
+                                        .watch-button {
+                                            display: inline-block;
+                                            padding: 2px 8px;
+                                            background-color: rgba(0, 0, 0, 0.7);
+                                            border-radius: 4px;
+                                            text-decoration: none !important;
+                                            transition: all 0.3s ease;
+                                            z-index: 1000;
+                                        }
+                                        .watch-button:hover {
+                                            background-color: #4CAF50;
+                                            color: white !important;
+                                        }
+                                    `;
+                                    document.head.appendChild(style);
+                                })();
+                            """, null)
+                        }
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                            val url = request?.url?.toString() ?: return false
+                            return if (!url.contains("jacred.xyz")) {
+                                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                ctx.startActivity(intent)
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                            if (url == null) return false
+                            return if (!url.contains("jacred.xyz")) {
+                                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                ctx.startActivity(intent)
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    }
+                    
+                    // Добавляем JavaScript интерфейс для работы с TorrServe
+                    addJavascriptInterface(object : Any() {
+                        @JavascriptInterface
+                        fun addMagnetToTorrServe(magnetUrl: String) {
+                            Log.d("JacredScreen", "Получена магнет-ссылка: $magnetUrl")
+                            coroutineScope.launch(Dispatchers.Main) {
+                                Toast.makeText(context, "Добавление торрента...", Toast.LENGTH_SHORT).show()
+                                val success = torrServeManager.addAndPlay(magnetUrl)
+                                if (!success) {
+                                    Toast.makeText(context, "Ошибка при добавлении торрента", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    }, "Android")
+                }
+            },
+            update = { view ->
+                view.settings.setSupportZoom(!disableZoom)
+                view.settings.builtInZoomControls = !disableZoom
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+        // Кнопка назад
+        androidx.compose.material3.IconButton(
+            onClick = { onClose() },
+            modifier = Modifier
+                .padding(16.dp)
+                .align(Alignment.TopStart)
+                .size(48.dp)
+                .background(Color(0xAA222222), shape = CircleShape)
+        ) {
+            Icon(
+                imageVector = Icons.Default.ArrowBack,
+                contentDescription = "Назад",
+                tint = Color.White,
+                modifier = Modifier.size(32.dp)
+            )
         }
     }
 }

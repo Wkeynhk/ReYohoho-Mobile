@@ -78,6 +78,16 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
+import android.widget.Toast
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.border
 
 /**
  * Экран настроек приложения
@@ -92,6 +102,14 @@ fun SettingsScreen(
 ) {
     var currentScreen by remember { mutableStateOf("main") }
     val notifyOnUpdate = remember { mutableStateOf(settingsManager.isNotifyOnUpdateEnabled()) }
+    // BackHandler: если не main — переход на main, если main — закрыть настройки
+    androidx.activity.compose.BackHandler {
+        if (currentScreen != "main") {
+            currentScreen = "main"
+        } else {
+            onClose()
+        }
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -129,6 +147,7 @@ fun SettingsScreen(
                 onBack = { currentScreen = "main" },
                 onClose = onClose
             )
+            "torrents" -> TorrentsSettingsScreen(onBack = { currentScreen = "main" }, onClose = onClose)
         }
     }
 }
@@ -223,6 +242,14 @@ fun MainSettingsScreen(
                     onClick = { onNavigateTo("downloads") }
                 )
                 
+                // --- Новый раздел Торренты ---
+                SettingsItem(
+                    icon = Icons.Default.Settings,
+                    title = "Торренты",
+                    subtitle = "Интеграция с TorrServe",
+                    onClick = { onNavigateTo("torrents") }
+                )
+                
                 // О приложении
                 SettingsItem(
                     icon = Icons.Default.Settings,
@@ -275,7 +302,7 @@ fun SiteSettingsScreen(
                     .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
             ) {
                 Icon(
-                    imageVector = Icons.Default.ArrowBack,
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Назад",
                     tint = Color.White
                 )
@@ -402,6 +429,15 @@ fun SiteSettingsScreen(
                     description = "Загружаться на последней посещённой странице вместо главной",
                     checked = loadOnMainPage.value,
                     onCheckedChange = { settingsManager.toggleLoadOnMainPage() }
+                )
+            }
+            
+            item {
+                SettingSwitch(
+                    title = "Отключить блокировщик рекламы",
+                    description = "Полностью отключить блокировку рекламы",
+                    checked = settingsManager.adblockDisabledFlow.collectAsState().value,
+                    onCheckedChange = { settingsManager.setAdblockDisabled(it) }
                 )
             }
             
@@ -811,9 +847,17 @@ fun AppearanceSettingsScreen(
     onBackPressed: () -> Unit,
     onClose: () -> Unit
 ) {
+    var showSettingsInfo by remember { mutableStateOf(false) }
+    var showTorrentInfo by remember { mutableStateOf(false) }
     val removeTopSpacing = settingsManager.removeTopSpacingFlow.collectAsState()
     val fullscreenMode = settingsManager.fullscreenModeFlow.collectAsState()
     val showSettingsButtonOnlyOnSettingsPage = settingsManager.showSettingsButtonOnlyOnSettingsPageFlow.collectAsState()
+    val settingsButtonPadding = settingsManager.settingsButtonPaddingFlow.collectAsState()
+    var showSettingsPositionOverlay by remember { mutableStateOf(false) }
+    var previewSettingsButtonOffset by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    var showTorrentPositionOverlay by remember { mutableStateOf(false) }
+    var previewTorrentButtonOffset by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    val torrentButtonPadding = settingsManager.torrentButtonPaddingFlow.collectAsState()
     val context = LocalContext.current
     
     // Отслеживаем изменение настройки полноэкранного режима
@@ -825,80 +869,236 @@ fun AppearanceSettingsScreen(
         }
     }
     
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        // Верхняя панель
-        Row(
+    Box(Modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 36.dp, bottom = 24.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .padding(16.dp)
         ) {
-            IconButton(
-                onClick = onBackPressed,
+            // Верхняя панель
+            Row(
                 modifier = Modifier
-                    .size(42.dp)
-                    .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
+                    .fillMaxWidth()
+                    .padding(top = 36.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.ArrowBack,
-                    contentDescription = "Назад",
-                    tint = Color.White
+                IconButton(
+                    onClick = onBackPressed,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = "Назад",
+                        tint = Color.White
+                    )
+                }
+                Text(
+                    text = "Внешний вид",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center
+                )
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Закрыть",
+                        tint = Color.White
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(32.dp))
+            // Настройка отступа
+            SettingSwitch(
+                title = "Убрать отступ сверху",
+                description = "Уменьшает пустое пространство вверху страницы",
+                checked = removeTopSpacing.value,
+                onCheckedChange = { settingsManager.toggleTopSpacing() }
+            )
+            // Настройка полноэкранного режима
+            SettingSwitch(
+                title = "Полноэкранный режим",
+                description = "Скрыть системные панели для более комфортного просмотра",
+                checked = fullscreenMode.value,
+                onCheckedChange = { settingsManager.toggleFullscreenMode() }
+            )
+            // Переключатель "Кнопка настроек только на странице настроек" ПЕРЕД выбором положения кнопок
+            SettingSwitch(
+                title = "Кнопка настроек только на странице настроек",
+                description = "Показывать кнопку настроек только на странице настроек сайта",
+                checked = showSettingsButtonOnlyOnSettingsPage.value,
+                onCheckedChange = { settingsManager.toggleShowSettingsButtonOnlyOnSettingsPage() }
+            )
+            // --- Положение кнопки настроек ---
+            Spacer(modifier = Modifier.height(20.dp))
+            Text("Положение кнопки настроек", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { showSettingsPositionOverlay = true },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White)
+                ) { Text("Выбрать") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = { settingsManager.resetSettingsButtonPadding() },
+                    modifier = Modifier,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF44336))
+                ) { Text("Сбросить") }
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = { showSettingsInfo = true }) {
+                    Icon(Icons.Default.Info, contentDescription = "Инфо", tint = Color(0xFF4CAF50))
+                }
+            }
+            if (showSettingsInfo) {
+                AlertDialog(
+                    onDismissRequest = { showSettingsInfo = false },
+                    confirmButton = { TextButton(onClick = { showSettingsInfo = false }) { Text("ОК") } },
+                    title = { Text("Положение кнопки настроек") },
+                    text = {
+                        val (end, bottom) = settingsButtonPadding.value
+                        Text("Текущее положение: end=${end.toInt()}dp, bottom=${bottom.toInt()}dp\n(отступ справа и снизу)")
+                    }
                 )
             }
-            
-            Text(
-                text = "Внешний вид",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Center
-            )
-            
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier
-                    .size(42.dp)
-                    .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Закрыть",
-                    tint = Color.White
+            // --- Положение кнопки торрентов ---
+            Spacer(modifier = Modifier.height(20.dp))
+            Text("Положение кнопки торрентов", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { showTorrentPositionOverlay = true },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White)
+                ) { Text("Выбрать") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = { settingsManager.resetTorrentButtonPadding() },
+                    modifier = Modifier,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF44336))
+                ) { Text("Сбросить") }
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = { showTorrentInfo = true }) {
+                    Icon(Icons.Default.Info, contentDescription = "Инфо", tint = Color(0xFF4CAF50))
+                }
+            }
+            if (showTorrentInfo) {
+                AlertDialog(
+                    onDismissRequest = { showTorrentInfo = false },
+                    confirmButton = { TextButton(onClick = { showTorrentInfo = false }) { Text("ОК") } },
+                    title = { Text("Положение кнопки торрентов") },
+                    text = {
+                        val (end, bottom) = torrentButtonPadding.value
+                        Text("Текущее положение: end=${end.toInt()}dp, bottom=${bottom.toInt()}dp\n(отступ справа и снизу)")
+                    }
                 )
             }
         }
-        
-        LazyColumn {
-            item {
-                // Настройка отступа
-                SettingSwitch(
-                    title = "Убрать отступ сверху",
-                    description = "Уменьшает пустое пространство вверху страницы",
-                    checked = removeTopSpacing.value,
-                    onCheckedChange = { settingsManager.toggleTopSpacing() }
+        if (showSettingsPositionOverlay) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0x88000000))
+                    .clickable { },
+                contentAlignment = Alignment.Center
+            ) {
+                val density = LocalDensity.current
+                Text(
+                    text = "Нажмите в нужное место для кнопки",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp)
                 )
-                
-                // Настройка полноэкранного режима
-                SettingSwitch(
-                    title = "Полноэкранный режим",
-                    description = "Скрыть системные панели для более комфортного просмотра",
-                    checked = fullscreenMode.value,
-                    onCheckedChange = { settingsManager.toggleFullscreenMode() }
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onPress = { offset ->
+                                    previewSettingsButtonOffset = offset.x to offset.y
+                                },
+                                onTap = { offset ->
+                                    val screenWidth = size.width
+                                    val screenHeight = size.height
+                                    val endPx = screenWidth - offset.x
+                                    val bottomPx = screenHeight - offset.y
+                                    val endDp = with(density) { endPx.toDp().value }
+                                    val bottomDp = with(density) { bottomPx.toDp().value }
+                                    settingsManager.setSettingsButtonPadding(endDp, bottomDp)
+                                    showSettingsPositionOverlay = false
+                                    previewSettingsButtonOffset = null
+                                }
+                            )
+                        }
+                ) {
+                    previewSettingsButtonOffset?.let { (x, y) ->
+                        Box(
+                            Modifier
+                                .absoluteOffset { IntOffset(x.toInt(), y.toInt()) }
+                                .size(56.dp)
+                                .background(Color.White.copy(alpha = 0.3f), shape = CircleShape)
+                        )
+                    }
+                }
+            }
+        }
+        if (showTorrentPositionOverlay) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0x88000000))
+                    .clickable { },
+                contentAlignment = Alignment.Center
+            ) {
+                val density = LocalDensity.current
+                Text(
+                    text = "Нажмите в нужное место для кнопки",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp)
                 )
-                
-                // Настройка показа кнопки настроек
-                SettingSwitch(
-                    title = "Кнопка настроек только на странице настроек",
-                    description = "Показывать кнопку настроек только на странице настроек сайта",
-                    checked = showSettingsButtonOnlyOnSettingsPage.value,
-                    onCheckedChange = { settingsManager.toggleShowSettingsButtonOnlyOnSettingsPage() }
-                )
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onPress = { offset ->
+                                    previewTorrentButtonOffset = offset.x to offset.y
+                                },
+                                onTap = { offset ->
+                                    val screenWidth = size.width
+                                    val screenHeight = size.height
+                                    val endPx = screenWidth - offset.x
+                                    val bottomPx = screenHeight - offset.y
+                                    val endDp = with(density) { endPx.toDp().value }
+                                    val bottomDp = with(density) { bottomPx.toDp().value }
+                                    settingsManager.setTorrentButtonPadding(endDp, bottomDp)
+                                    showTorrentPositionOverlay = false
+                                    previewTorrentButtonOffset = null
+                                }
+                            )
+                        }
+                ) {
+                    previewTorrentButtonOffset?.let { (x, y) ->
+                        Box(
+                            Modifier
+                                .absoluteOffset { IntOffset(x.toInt(), y.toInt()) }
+                                .size(56.dp)
+                                .background(Color.White.copy(alpha = 0.3f), shape = CircleShape)
+                        )
+                    }
+                }
             }
         }
     }
@@ -1803,6 +2003,191 @@ fun DownloadSettingsScreen(
                     onCheckedChange = { settingsManager.setShowDownloadConfirmation(it) }
                 )
             }
+        }
+    }
+} 
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TorrentsSettingsScreen(onBack: () -> Unit, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val settingsManager = SettingsManager.getInstance(context)
+    val torrentsEnabled = settingsManager.torrentsEnabledFlow.collectAsState().value
+    val externalTorrServeUrl = settingsManager.externalTorrServeUrlFlow.collectAsState().value
+    var urlInput by remember { mutableStateOf(externalTorrServeUrl.removeSuffix("/")) }
+    var urlValid by remember { mutableStateOf(false) }
+    var checkResult by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
+
+    fun validateUrl(url: String): Boolean {
+        // Валидный http/https, ip, домен или localhost, обязательно порт, без слеша на конце
+        val regex = Regex("^https?://((([a-zA-Z0-9\\-]+\\.)+[a-zA-Z]{2,})|(localhost)|((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)):(\\d{2,5})$")
+        return regex.matches(url)
+    }
+
+    LaunchedEffect(urlInput) {
+        urlValid = validateUrl(urlInput)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121212))
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 36.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Назад",
+                    tint = Color.White
+                )
+            }
+            Text(
+                text = "Торренты",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center
+            )
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(Color(0xFF2A2A2A), shape = MaterialTheme.shapes.small)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
+                    tint = Color.White
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
+        // Переключатель активации торрентов
+        SettingSwitch(
+            title = "Активировать торренты",
+            description = "Включить или выключить все функции с торрентами",
+            checked = torrentsEnabled,
+            onCheckedChange = { settingsManager.setTorrentsEnabled(!torrentsEnabled) }
+        )
+        if (torrentsEnabled) {
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "Интеграция с TorrServe",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "URL внешнего TorrServe",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF2A2A2A), RoundedCornerShape(8.dp))
+                    .border(1.dp, if (urlValid) Color(0xFF4CAF50) else Color.Gray, RoundedCornerShape(8.dp))
+                    .padding(start = 16.dp, end = 8.dp)
+                    .heightIn(min = 48.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BasicTextField(
+                        value = urlInput,
+                        onValueChange = {
+                            urlInput = it.removeSuffix("/")
+                            checkResult = null
+                        },
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = Color.White,
+                            fontSize = 16.sp
+                        ),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    if (urlInput.isNotEmpty() && urlValid) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "URL валиден и сохранён",
+                            tint = Color(0xFF4CAF50),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    } else if (urlInput.isNotEmpty()) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "URL некорректен",
+                            tint = Color(0xFFF44336),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+            }
+            // Автоматическое сохранение при валидном URL
+            LaunchedEffect(urlInput, urlValid) {
+                if (urlValid) {
+                    settingsManager.setExternalTorrServeUrl(urlInput)
+                    settingsManager.setUseInternalTorrServe(false)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    checking = true
+                    checkResult = null
+                    kotlinx.coroutines.GlobalScope.launch {
+                        try {
+                            val available = com.example.reyohoho.ui.TorrServeManager.getInstance(context).checkTorrServeAvailable()
+                            checking = false
+                            checkResult = if (available) "Соединение успешно" else "Нет соединения"
+                        } catch (e: Exception) {
+                            checking = false
+                            checkResult = "Ошибка: ${e.message}"
+                        }
+                    }
+                },
+                enabled = urlValid && !checking,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (checking) "Проверка..." else "Проверить соединение")
+            }
+            if (checkResult != null) {
+                Text(
+                    text = checkResult ?: "",
+                    color = if (checkResult == "Соединение успешно") Color(0xFF4CAF50) else Color(0xFFF44336),
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Пример: http://localhost:8090, http://192.168.1.100:8090",
+                color = Color.Gray,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
         }
     }
 } 

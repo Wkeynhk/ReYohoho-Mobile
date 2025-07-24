@@ -351,6 +351,10 @@ class CustomWebViewClient(
         request: WebResourceRequest
     ): WebResourceResponse? {
         val url = request.url.toString()
+        // Отключение блокировщика рекламы по настройке
+        if (settingsManager?.isAdblockDisabled() == true) {
+            return super.shouldInterceptRequest(view, request)
+        }
         if (AdBlocker.isAd(url)) {
             Log.d("AdBlocker", "Заблокирован: $url")
             // Возвращаем пустой ответ для блокировки ресурса
@@ -1218,6 +1222,11 @@ private fun injectFullscreenVideoSupport(webView: WebView) {
  * Внедряет мощный блокировщик рекламы на основе uBlock Origin и RuAdList
  */
 private fun injectRussianAdBlocker(webView: WebView) {
+    // Не внедряем блокировщик, если он отключён в настройках
+    val context = webView.context
+    val settingsManager = try { SettingsManager.getInstance(context) } catch (e: Exception) { null }
+    if (settingsManager?.isAdblockDisabled() == true) return
+    
     // Мощный CSS блокировщик на основе RuAdList и EasyList
     val advancedAdBlockerCSS = """
         (function() {

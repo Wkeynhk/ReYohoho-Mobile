@@ -33,10 +33,23 @@ class SettingsManager(context: Context) {
         private const val KEY_ADBLOCK_PREFERRED_SOURCE = "adblock_preferred_source"
         private const val KEY_LOAD_ON_MAIN_PAGE = "load_on_main_page"
         private const val KEY_SHOW_SETTINGS_BUTTON_ONLY_ON_SETTINGS_PAGE = "show_settings_button_only_on_settings_page"
+        private const val KEY_SETTINGS_BUTTON_X = "settings_button_x"
+        private const val KEY_SETTINGS_BUTTON_Y = "settings_button_y"
+        private const val KEY_TORRENT_BUTTON_X = "torrent_button_x"
+        private const val KEY_TORRENT_BUTTON_Y = "torrent_button_y"
+        private const val KEY_TORRENTS_ENABLED = "torrents_enabled"
+        private const val KEY_SETTINGS_BUTTON_END = "settings_button_end"
+        private const val KEY_SETTINGS_BUTTON_BOTTOM = "settings_button_bottom"
+        private const val KEY_TORRENT_BUTTON_END = "torrent_button_end"
+        private const val KEY_TORRENT_BUTTON_BOTTOM = "torrent_button_bottom"
+        private const val KEY_USE_INTERNAL_TORRSERVE = "use_internal_torrserve"
+        private const val KEY_EXTERNAL_TORRSERVE_URL = "external_torrserve_url"
+        private const val KEY_ADBLOCK_DISABLED = "adblock_disabled"
         const val DEVICE_TYPE_ANDROID = "android"
         const val DEVICE_TYPE_ANDROID_TV = "android_tv"
         const val ADBLOCK_SOURCE_INTERNET = "internet"
         const val ADBLOCK_SOURCE_LOCAL = "local"
+        private const val DEFAULT_EXTERNAL_TORRSERVE_URL = "http://localhost:8090/"
 
         // Синглтон для доступа к настройкам из любой части приложения
         @Volatile
@@ -89,6 +102,88 @@ class SettingsManager(context: Context) {
     // StateFlow для отслеживания настройки показа кнопки настроек
     private val _showSettingsButtonOnlyOnSettingsPageFlow = MutableStateFlow(isShowSettingsButtonOnlyOnSettingsPageEnabled())
     val showSettingsButtonOnlyOnSettingsPageFlow: StateFlow<Boolean> = _showSettingsButtonOnlyOnSettingsPageFlow.asStateFlow()
+    
+    // StateFlow для позиции кнопки настроек (end, bottom в dp)
+    private val _settingsButtonPaddingFlow = MutableStateFlow(getSettingsButtonPadding())
+    val settingsButtonPaddingFlow: StateFlow<Pair<Float, Float>> = _settingsButtonPaddingFlow.asStateFlow()
+    fun getSettingsButtonPadding(): Pair<Float, Float> {
+        val end = prefs.getFloat(KEY_SETTINGS_BUTTON_END, 16f)
+        val bottom = prefs.getFloat(KEY_SETTINGS_BUTTON_BOTTOM, 80f)
+        return end to bottom
+    }
+    fun setSettingsButtonPadding(end: Float, bottom: Float) {
+        prefs.edit().putFloat(KEY_SETTINGS_BUTTON_END, end).putFloat(KEY_SETTINGS_BUTTON_BOTTOM, bottom).apply()
+        _settingsButtonPaddingFlow.value = end to bottom
+    }
+    fun resetSettingsButtonPadding() {
+        setSettingsButtonPadding(16f, 80f)
+    }
+
+    // StateFlow для позиции кнопки торрентов (end, bottom в dp)
+    private val _torrentButtonPaddingFlow = MutableStateFlow(getTorrentButtonPadding())
+    val torrentButtonPaddingFlow: StateFlow<Pair<Float, Float>> = _torrentButtonPaddingFlow.asStateFlow()
+    fun getTorrentButtonPadding(): Pair<Float, Float> {
+        val end = prefs.getFloat(KEY_TORRENT_BUTTON_END, 88f)
+        val bottom = prefs.getFloat(KEY_TORRENT_BUTTON_BOTTOM, 80f)
+        return end to bottom
+    }
+    fun setTorrentButtonPadding(end: Float, bottom: Float) {
+        prefs.edit().putFloat(KEY_TORRENT_BUTTON_END, end).putFloat(KEY_TORRENT_BUTTON_BOTTOM, bottom).apply()
+        _torrentButtonPaddingFlow.value = end to bottom
+    }
+    fun resetTorrentButtonPadding() {
+        setTorrentButtonPadding(88f, 80f)
+    }
+
+    // StateFlow для переключателя торрентов
+    private val _torrentsEnabledFlow = MutableStateFlow(isTorrentsEnabled())
+    val torrentsEnabledFlow: StateFlow<Boolean> = _torrentsEnabledFlow.asStateFlow()
+    fun isTorrentsEnabled(): Boolean {
+        return prefs.getBoolean(KEY_TORRENTS_ENABLED, true)
+    }
+    fun setTorrentsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_TORRENTS_ENABLED, enabled).apply()
+        _torrentsEnabledFlow.value = enabled
+    }
+
+    // StateFlow для настройки использования внутреннего TorrServe
+    private val _useInternalTorrServeFlow = MutableStateFlow(isUseInternalTorrServe())
+    val useInternalTorrServeFlow: StateFlow<Boolean> = _useInternalTorrServeFlow.asStateFlow()
+    
+    // StateFlow для URL внешнего TorrServe
+    private val _externalTorrServeUrlFlow = MutableStateFlow(getExternalTorrServeUrl())
+    val externalTorrServeUrlFlow: StateFlow<String> = _externalTorrServeUrlFlow.asStateFlow()
+    
+    /**
+     * Проверяет, используется ли встроенный TorrServe
+     */
+    fun isUseInternalTorrServe(): Boolean {
+        return prefs.getBoolean(KEY_USE_INTERNAL_TORRSERVE, true)
+    }
+    
+    /**
+     * Устанавливает использование встроенного или внешнего TorrServe
+     */
+    fun setUseInternalTorrServe(useInternal: Boolean) {
+        prefs.edit().putBoolean(KEY_USE_INTERNAL_TORRSERVE, useInternal).apply()
+        _useInternalTorrServeFlow.value = useInternal
+    }
+    
+    /**
+     * Возвращает URL внешнего TorrServe
+     */
+    fun getExternalTorrServeUrl(): String {
+        return prefs.getString(KEY_EXTERNAL_TORRSERVE_URL, DEFAULT_EXTERNAL_TORRSERVE_URL) 
+            ?: DEFAULT_EXTERNAL_TORRSERVE_URL
+    }
+    
+    /**
+     * Устанавливает URL внешнего TorrServe
+     */
+    fun setExternalTorrServeUrl(url: String) {
+        prefs.edit().putString(KEY_EXTERNAL_TORRSERVE_URL, url).apply()
+        _externalTorrServeUrlFlow.value = url
+    }
     
     /**
      * Проверяет, установлен ли тип устройства
@@ -404,6 +499,22 @@ class SettingsManager(context: Context) {
     fun toggleShowSettingsButtonOnlyOnSettingsPage(): Boolean {
         val newValue = !isShowSettingsButtonOnlyOnSettingsPageEnabled()
         setShowSettingsButtonOnlyOnSettingsPage(newValue)
+        return newValue
+    }
+
+    // StateFlow для полного отключения блокировщика рекламы
+    private val _adblockDisabledFlow = MutableStateFlow(isAdblockDisabled())
+    val adblockDisabledFlow: StateFlow<Boolean> = _adblockDisabledFlow.asStateFlow()
+    fun isAdblockDisabled(): Boolean {
+        return prefs.getBoolean(KEY_ADBLOCK_DISABLED, false)
+    }
+    fun setAdblockDisabled(disabled: Boolean) {
+        prefs.edit().putBoolean(KEY_ADBLOCK_DISABLED, disabled).apply()
+        _adblockDisabledFlow.value = disabled
+    }
+    fun toggleAdblockDisabled(): Boolean {
+        val newValue = !isAdblockDisabled()
+        setAdblockDisabled(newValue)
         return newValue
     }
 } 
