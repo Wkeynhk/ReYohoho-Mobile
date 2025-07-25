@@ -205,7 +205,8 @@ class MainActivity : ComponentActivity() {
             val finalUrl = urlToLoad ?: settingsManager.getSiteMirror()
             Log.d(TAG, "Загружаем URL: $finalUrl")
             
-            val appVersion = "3.3"
+            // Удалено: // val appVersion = "3.3"
+            val appVersion = packageManager.getPackageInfo(packageName, 0).versionName!!
             
             setContent {
                 // Всегда используем темную тему независимо от настроек системы

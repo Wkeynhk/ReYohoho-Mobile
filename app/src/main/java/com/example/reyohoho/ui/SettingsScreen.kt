@@ -88,6 +88,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import android.widget.Toast
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.border
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 
 /**
  * Экран настроек приложения
@@ -786,17 +788,6 @@ fun AppSettingsScreen(
             description = "Скрыть системные панели",
             checked = fullscreenMode.value,
             onCheckedChange = { settingsManager.toggleFullscreenMode() }
-        )
-        
-        val versionName = "1.0.0" // Замените на реальное значение
-        Text(
-            text = "Версия приложения: $versionName",
-            color = Color.Gray,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 32.dp),
-            textAlign = TextAlign.Center,
-            fontSize = 12.sp
         )
     }
 }
@@ -2100,39 +2091,38 @@ fun TorrentsSettingsScreen(onBack: () -> Unit, onClose: () -> Unit) {
                 fontWeight = FontWeight.Medium
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Box(
+            
+            // Заменяем BasicTextField на TextField с улучшенной поддержкой для ТВ
+            OutlinedTextField(
+                value = urlInput,
+                onValueChange = {
+                    urlInput = it.removeSuffix("/")
+                    checkResult = null
+                },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF2A2A2A), RoundedCornerShape(8.dp))
-                    .border(1.dp, if (urlValid) Color(0xFF4CAF50) else Color.Gray, RoundedCornerShape(8.dp))
-                    .padding(start = 16.dp, end = 8.dp)
-                    .heightIn(min = 48.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    BasicTextField(
-                        value = urlInput,
-                        onValueChange = {
-                            urlInput = it.removeSuffix("/")
-                            checkResult = null
-                        },
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            color = Color.White,
-                            fontSize = 16.sp
-                        ),
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    .fillMaxWidth(),
+                textStyle = androidx.compose.ui.text.TextStyle(
+                    color = Color.White,
+                    fontSize = 16.sp
+                ),
+                singleLine = true,
+                shape = RoundedCornerShape(8.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color(0xFF2A2A2A),
+                    unfocusedContainerColor = Color(0xFF2A2A2A),
+                    focusedBorderColor = if (urlValid) Color(0xFF4CAF50) else Color.Gray,
+                    unfocusedBorderColor = if (urlValid) Color(0xFF4CAF50) else Color.Gray,
+                    cursorColor = Color(0xFF4CAF50),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                ),
+                trailingIcon = {
                     if (urlInput.isNotEmpty() && urlValid) {
                         Icon(
                             imageVector = Icons.Default.Check,
-                            contentDescription = "URL валиден и сохранён",
+                            contentDescription = "URL валиден",
                             tint = Color(0xFF4CAF50),
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     } else if (urlInput.isNotEmpty()) {
                         Icon(
@@ -2142,8 +2132,16 @@ fun TorrentsSettingsScreen(onBack: () -> Unit, onClose: () -> Unit) {
                             modifier = Modifier.size(24.dp)
                         )
                     }
+                },
+                placeholder = {
+                    Text(
+                        "Например: http://192.168.1.100:8090",
+                        color = Color.Gray,
+                        fontSize = 16.sp
+                    )
                 }
-            }
+            )
+            
             // Автоматическое сохранение при валидном URL
             LaunchedEffect(urlInput, urlValid) {
                 if (urlValid) {
@@ -2151,7 +2149,7 @@ fun TorrentsSettingsScreen(onBack: () -> Unit, onClose: () -> Unit) {
                     settingsManager.setUseInternalTorrServe(false)
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = {
                     checking = true
