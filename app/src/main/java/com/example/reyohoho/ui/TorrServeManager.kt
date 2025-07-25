@@ -21,6 +21,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 import com.example.reyohoho.ui.logToFile
+import kotlinx.coroutines.CompletableDeferred
 
 /**
  * Класс для управления взаимодействием с TorrServe
@@ -1072,28 +1073,22 @@ class TorrServeManager(private val context: Context) {
                 Toast.makeText(context, "Нет подключения к интернету", Toast.LENGTH_SHORT).show()
                 return@withContext false
             }
-            
             // Показываем сообщение о начале процесса
             Toast.makeText(context, "Добавление торрента...", Toast.LENGTH_SHORT).show()
-            
             // Проверяем доступность TorrServe
             val available = withContext(Dispatchers.IO) { checkTorrServeAvailable() }
-            
             if (!available) {
                 val message = "TorrServe недоступен по адресу: ${settingsManager.getExternalTorrServeUrl()}"
                 logDebug(message)
                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                 return@withContext false
             }
-            
             val hash = withContext(Dispatchers.IO) { addTorrent(magnetUrl) }
-            
             if (hash != null) {
                 // Ждем готовности торрента
                 val ready = withContext(Dispatchers.IO) { 
                     waitForTorrentReady(hash, 30000, 2000) 
                 }
-                
                 logDebug("Торрент ${if (ready) "готов" else "не готов"} к воспроизведению, запускаем плеер")
                 playTorrent(hash)
                 return@withContext true

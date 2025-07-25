@@ -45,6 +45,7 @@ class SettingsManager(context: Context) {
         private const val KEY_USE_INTERNAL_TORRSERVE = "use_internal_torrserve"
         private const val KEY_EXTERNAL_TORRSERVE_URL = "external_torrserve_url"
         private const val KEY_ADBLOCK_DISABLED = "adblock_disabled"
+        private const val KEY_HIDE_TORRENT_VIP_INFO = "hide_torrent_vip_info"
         const val DEVICE_TYPE_ANDROID = "android"
         const val DEVICE_TYPE_ANDROID_TV = "android_tv"
         const val ADBLOCK_SOURCE_INTERNET = "internet"
@@ -139,7 +140,7 @@ class SettingsManager(context: Context) {
     private val _torrentsEnabledFlow = MutableStateFlow(isTorrentsEnabled())
     val torrentsEnabledFlow: StateFlow<Boolean> = _torrentsEnabledFlow.asStateFlow()
     fun isTorrentsEnabled(): Boolean {
-        return prefs.getBoolean(KEY_TORRENTS_ENABLED, true)
+        return prefs.getBoolean(KEY_TORRENTS_ENABLED, false)
     }
     fun setTorrentsEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_TORRENTS_ENABLED, enabled).apply()
@@ -516,5 +517,38 @@ class SettingsManager(context: Context) {
         val newValue = !isAdblockDisabled()
         setAdblockDisabled(newValue)
         return newValue
+    }
+
+    // StateFlow для отслеживания состояния отображения информации о VIP в разделе торрентов
+    private val _hideTorrentVipInfoFlow = MutableStateFlow(isHideTorrentVipInfo())
+    val hideTorrentVipInfoFlow: StateFlow<Boolean> = _hideTorrentVipInfoFlow.asStateFlow()
+    
+    /**
+     * Проверяет, скрыта ли информация о том, что торренты не относятся к VIP
+     */
+    fun isHideTorrentVipInfo(): Boolean {
+        return prefs.getBoolean(KEY_HIDE_TORRENT_VIP_INFO, false)
+    }
+    
+    /**
+     * Устанавливает состояние отображения информации о VIP в разделе торрентов
+     */
+    fun setHideTorrentVipInfo(hide: Boolean) {
+        prefs.edit().putBoolean(KEY_HIDE_TORRENT_VIP_INFO, hide).apply()
+        _hideTorrentVipInfoFlow.value = hide
+    }
+    
+    /**
+     * Показывает информацию о том, что торренты не относятся к VIP
+     */
+    fun showTorrentVipInfo() {
+        setHideTorrentVipInfo(false)
+    }
+    
+    /**
+     * Скрывает информацию о том, что торренты не относятся к VIP
+     */
+    fun hideTorrentVipInfo() {
+        setHideTorrentVipInfo(true)
     }
 } 

@@ -2005,6 +2005,7 @@ fun TorrentsSettingsScreen(onBack: () -> Unit, onClose: () -> Unit) {
     val settingsManager = SettingsManager.getInstance(context)
     val torrentsEnabled = settingsManager.torrentsEnabledFlow.collectAsState().value
     val externalTorrServeUrl = settingsManager.externalTorrServeUrlFlow.collectAsState().value
+    val hideTorrentVipInfo = settingsManager.hideTorrentVipInfoFlow.collectAsState().value
     var urlInput by remember { mutableStateOf(externalTorrServeUrl.removeSuffix("/")) }
     var urlValid by remember { mutableStateOf(false) }
     var checkResult by remember { mutableStateOf<String?>(null) }
@@ -2018,6 +2019,41 @@ fun TorrentsSettingsScreen(onBack: () -> Unit, onClose: () -> Unit) {
 
     LaunchedEffect(urlInput) {
         urlValid = validateUrl(urlInput)
+    }
+
+    // Модальное окно для информации о VIP
+    if (!hideTorrentVipInfo) {
+        AlertDialog(
+            onDismissRequest = { },
+            containerColor = Color(0xFF2F2F2F),
+            title = {
+                Text(
+                    text = "Функции торрентов",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            },
+            text = {
+                Text(
+                    text = "Функции связанные с торрентами не относятся к подписке ReYohoho VIP",
+                    fontSize = 16.sp,
+                    color = Color.White,
+                    lineHeight = 24.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { settingsManager.hideTorrentVipInfo() }
+                ) {
+                    Text(
+                        "Понятно, больше не показывать",
+                        color = Color(0xFF4CAF50),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        )
     }
 
     Column(
@@ -2066,7 +2102,9 @@ fun TorrentsSettingsScreen(onBack: () -> Unit, onClose: () -> Unit) {
                 )
             }
         }
-        Spacer(modifier = Modifier.height(32.dp))
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
         // Переключатель активации торрентов
         SettingSwitch(
             title = "Активировать торренты",
@@ -2074,6 +2112,7 @@ fun TorrentsSettingsScreen(onBack: () -> Unit, onClose: () -> Unit) {
             checked = torrentsEnabled,
             onCheckedChange = { settingsManager.setTorrentsEnabled(!torrentsEnabled) }
         )
+        
         if (torrentsEnabled) {
             Spacer(modifier = Modifier.height(24.dp))
             Text(

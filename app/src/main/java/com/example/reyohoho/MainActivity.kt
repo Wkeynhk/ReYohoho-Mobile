@@ -205,7 +205,6 @@ class MainActivity : ComponentActivity() {
             val finalUrl = urlToLoad ?: settingsManager.getSiteMirror()
             Log.d(TAG, "Загружаем URL: $finalUrl")
             
-            // Удалено: // val appVersion = "3.3"
             val appVersion = packageManager.getPackageInfo(packageName, 0).versionName!!
             
             setContent {
