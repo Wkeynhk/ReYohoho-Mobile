@@ -588,32 +588,16 @@ class TorrServeManager(private val context: Context) {
             
             // Для POST запросов с телом добавляем данные отдельно
             val postData = mapOf(
-                "/torrents" to "{\"link\":\"$magnetLink\",\"title\":\"Added from ReYohoho\"}",
+                "/torrents" to "{\"action\":\"add\",\"link\":\"$magnetLink\"}",
                 "/torrent/add" to "{\"link\":\"$magnetLink\"}"
             )
             
             // Список всех попыток
             val attempts = mutableListOf<Pair<String, String>>()
             
-            // Добавляем попытки в зависимости от типа API
-            if (isMatrixServer) {
-                logDebug("Используем Matrix API эндпоинты для добавления торрента")
-                // Matrix эндпоинты - порядок важен! Сначала самые надежные методы
-                attempts.add(Pair("GET", "/stream?link=${Uri.encode(magnetLink)}&preload=1&play=1"))
-                attempts.add(Pair("GET", "/stream?link=$hash&preload=1"))
-                attempts.add(Pair("GET", "/stream?link=${Uri.encode(magnetLink)}&preload=1"))
-                // Для Matrix.134 самый надежный метод
-                attempts.add(Pair("GET", "/stream/play?link=${Uri.encode(magnetLink)}&preload=1"))
-                // Остальные альтернативные методы
-                attempts.add(Pair("POST", "/torrents"))
-                attempts.add(Pair("GET", "/add/${Uri.encode(magnetLink)}"))
-                attempts.add(Pair("GET", "/play?link=${Uri.encode(magnetLink)}&save=true"))
-            } else {
-                // Общие попытки для обычных версий TorrServe
-                attempts.add(Pair("GET", "/torrent/add?link=${Uri.encode(magnetLink)}"))
-                attempts.add(Pair("POST", "/torrent/add"))
-                attempts.add(Pair("GET", "/torrents/add?link=${Uri.encode(magnetLink)}"))
-            }
+            // Используем только стандартный TorrServe API (как в desktop версии)
+            logDebug("Используем только стандартный TorrServe API")
+            attempts.add(Pair("POST", "/torrents"))
             
             // Пробуем все методы по очереди
             var successfulAttempt = false
@@ -629,37 +613,11 @@ class TorrServeManager(private val context: Context) {
                         null
                     }
                     
-                    val actualPath = path
-                    
-                    // Для Matrix сервера иногда сразу начинается стриминг вместо JSON ответа
-                    // Поэтому используем HEAD-запрос для проверки
-                    if (isMatrixServer && path.contains("stream") && path.contains("play")) {
-                        try {
-                            // Сначала проверяем, что сервер возвращает корректный ответ
-                            val connection = URL(getApiUrl(actualPath)).openConnection() as HttpURLConnection
-                            connection.requestMethod = "HEAD"
-                            connection.connectTimeout = 5000
-                            connection.readTimeout = 5000
-                            
-                            val responseCode = connection.responseCode
-                            connection.disconnect()
-                            
-                            if (responseCode == 200) {
-                                // Если сервер отвечает 200, считаем торрент добавленным
-                                logDebug("Matrix API возвращает 200 на HEAD запрос к $actualPath, считаем торрент добавленным")
-                                successfulAttempt = true
-                                break
-                            }
-                        } catch (e: Exception) {
-                            logDebug("Ошибка при HEAD запросе к $actualPath", e.toString())
-                        }
-                    }
-                    
-                    // Для обычных запросов используем стандартный метод
-                    val response = executeRequest(method, getApiUrl(actualPath), body)
+                    // Выполняем запрос
+                    val response = executeRequest(method, getApiUrl(path), body, timeout = 10000)
                     
                     if (response != null) {
-                        logDebug("Успешное добавление через $method $actualPath")
+                        logDebug("Успешное добавление через $method $path")
                         successfulAttempt = true
                         break
                     }
@@ -669,10 +627,9 @@ class TorrServeManager(private val context: Context) {
                 }
             }
             
-            // Запускаем предзагрузку, если торрент успешно добавлен
+            // Для стандартного API предзагрузка не нужна
             if (successfulAttempt) {
-                logDebug("Торрент был успешно добавлен, запускаем принудительную предзагрузку для хеша $hash")
-                forceTorrentPreload(hash)
+                logDebug("Торрент успешно добавлен через стандартный API")
             }
             
             // Возвращаем хеш в любом случае для возможности прямого воспроизведения
@@ -983,8 +940,24 @@ class TorrServeManager(private val context: Context) {
             // Для Matrix.134 нужно использовать формат с 'play' в конце
             return getApiUrl("/stream?link=$hash&index=$fileIndex&play")
         } else {
-            // Для стандартного TorrServe
-            return getApiUrl("/stream?link=$hash&index=$fileIndex")
+            // Для стандартного TorrServe с play параметром (как в desktop версии)
+            return getApiUrl("/stream?link=$hash&index=$fileIndex&play")
+        }
+    }
+    
+    /**
+     * Генерирует URL для воспроизведения с полным путем файла (как в desktop версии)
+     */
+    fun getPlaybackUrlWithPath(hash: String, fileIndex: Int, filePath: String): String {
+        logDebug("Формирование URL с путем файла, hash: $hash, fileIndex: $fileIndex, path: $filePath")
+        
+        if (filePath.isNotEmpty()) {
+            // Используем формат как в desktop версии: /stream/{path}?link={hash}&index={id}&play
+            val encodedPath = java.net.URLEncoder.encode(filePath, "UTF-8")
+            return getApiUrl("/stream/$encodedPath?link=$hash&index=$fileIndex&play")
+        } else {
+            // Fallback к обычному формату
+            return getPlaybackUrl(hash, fileIndex)
         }
     }
 
@@ -1085,9 +1058,14 @@ class TorrServeManager(private val context: Context) {
             }
             val hash = withContext(Dispatchers.IO) { addTorrent(magnetUrl) }
             if (hash != null) {
-                // Ждем готовности торрента
-                val ready = withContext(Dispatchers.IO) { 
-                    waitForTorrentReady(hash, 30000, 2000) 
+                // Для Matrix API торрент сразу готов, для остальных ждем
+                val ready = if (isMatrixServer) {
+                    logDebug("Matrix API - торрент готов сразу")
+                    true
+                } else {
+                    withContext(Dispatchers.IO) { 
+                        waitForTorrentReady(hash, 30000, 2000) 
+                    }
                 }
                 logDebug("Торрент ${if (ready) "готов" else "не готов"} к воспроизведению, запускаем плеер")
                 playTorrent(hash)
@@ -1105,6 +1083,383 @@ class TorrServeManager(private val context: Context) {
             return@withContext false
         }
     }
+
+    /**
+     * Получает список файлов в торренте
+     */
+    suspend fun getTorrentFiles(hash: String): List<TorrentFileUtils.TorrentFile> = withContext(Dispatchers.IO) {
+        logDebug("Получение списка файлов для торрента: $hash")
+        
+        if (!isNetworkAvailable()) {
+            logDebug("Нет подключения к интернету при получении файлов торрента")
+            return@withContext emptyList()
+        }
+
+        try {
+            // Используем только стандартный TorrServe API (как в desktop версии)
+            logDebug("Получение файлов через стандартный TorrServe API")
+            return@withContext getFilesViaStandardAPIWithRetry(hash)
+            
+        } catch (e: Exception) {
+            logDebug("Общая ошибка при получении файлов торрента", "${e.javaClass.simpleName}: ${e.message}")
+            return@withContext emptyList()
+        }
+    }
+
+    /**
+     * Парсинг файлов из ответа Matrix API
+     */
+    private fun parseMatrixTorrentFiles(response: String, hash: String): List<TorrentFileUtils.TorrentFile> {
+        logDebug("Парсинг Matrix API ответа: ${response.take(500)}...")
+        try {
+            val data = JSONObject(response)
+            val files = mutableListOf<TorrentFileUtils.TorrentFile>()
+            
+            logDebug("Ключи в JSON ответе: ${data.keys().asSequence().toList()}")
+            
+            // Matrix может возвращать файлы в разных форматах
+            if (data.has("files")) {
+                val filesArray = data.getJSONArray("files")
+                logDebug("Найден массив files с ${filesArray.length()} элементами")
+                
+                for (i in 0 until filesArray.length()) {
+                    val fileObj = filesArray.getJSONObject(i)
+                    val name = fileObj.optString("name", "")
+                    val path = fileObj.optString("path", name)
+                    val size = fileObj.optLong("length", 0L)
+                    
+                    logDebug("Файл $i: name='$name', path='$path', size=$size")
+                    
+                    if (name.isNotEmpty()) {
+                        files.add(TorrentFileUtils.TorrentFile(
+                            index = i,
+                            name = name,
+                            path = path,
+                            size = size
+                        ))
+                    }
+                }
+            } else {
+                logDebug("Массив 'files' не найден в ответе Matrix API")
+            }
+            
+            logDebug("Matrix API парсинг завершен, файлов: ${files.size}")
+            return files
+        } catch (e: JSONException) {
+            logDebug("Ошибка парсинга JSON ответа Matrix API", e.toString())
+            return emptyList()
+        }
+    }
+
+    /**
+     * Парсинг файлов из stream info Matrix API
+     */
+    private fun parseMatrixStreamInfo(response: String, hash: String): List<TorrentFileUtils.TorrentFile> {
+        try {
+            val data = JSONObject(response)
+            val files = mutableListOf<TorrentFileUtils.TorrentFile>()
+            
+            // Может содержать массив файлов или информацию о треках
+            if (data.has("tracks")) {
+                val tracksArray = data.getJSONArray("tracks")
+                for (i in 0 until tracksArray.length()) {
+                    val track = tracksArray.getJSONObject(i)
+                    val name = track.optString("title", "Файл $i")
+                    val size = track.optLong("size", 0L)
+                    
+                    files.add(TorrentFileUtils.TorrentFile(
+                        index = i,
+                        name = name,
+                        path = name,
+                        size = size
+                    ))
+                }
+            }
+            
+            return files
+        } catch (e: JSONException) {
+            logDebug("Ошибка парсинга stream info", e.toString())
+            return emptyList()
+        }
+    }
+
+    /**
+     * Парсинг файлов из стандартного TorrServe API
+     */
+    private fun parseStandardTorrentFiles(response: String, hash: String): List<TorrentFileUtils.TorrentFile> {
+        logDebug("Парсинг стандартного API ответа: ${response.take(500)}...")
+        try {
+            val data = JSONObject(response)
+            val files = mutableListOf<TorrentFileUtils.TorrentFile>()
+            
+            logDebug("Ключи в JSON ответе: ${data.keys().asSequence().toList()}")
+            
+            if (data.has("file_stats")) {
+                val fileStats = data.getJSONArray("file_stats")
+                logDebug("Найден массив file_stats с ${fileStats.length()} элементами")
+                
+                for (i in 0 until fileStats.length()) {
+                    val fileStat = fileStats.getJSONObject(i)
+                    val fullPath = fileStat.optString("path", "")
+                    val name = fullPath.substringAfterLast('/', fullPath)
+                    val size = fileStat.optLong("length", 0L)
+                    
+                    logDebug("Файл $i: name='$name', fullPath='$fullPath', size=$size")
+                    
+                    if (name.isNotEmpty()) {
+                        files.add(TorrentFileUtils.TorrentFile(
+                            index = i,
+                            name = name,
+                            path = fullPath,
+                            size = size
+                        ))
+                    }
+                }
+            } else {
+                logDebug("Массив 'file_stats' не найден в ответе стандартного API")
+            }
+            
+            logDebug("Стандартный API парсинг завершен, файлов: ${files.size}")
+            return files
+        } catch (e: JSONException) {
+            logDebug("Ошибка парсинга стандартного API", e.toString())
+            return emptyList()
+        }
+    }
+
+    /**
+     * Парсинг файлов из списка торрентов
+     */
+    private fun parseStandardTorrentsList(response: String, hash: String): List<TorrentFileUtils.TorrentFile> {
+        try {
+            val torrentsArray = JSONObject("{\"data\": $response}").getJSONArray("data")
+            
+            for (i in 0 until torrentsArray.length()) {
+                val torrent = torrentsArray.getJSONObject(i)
+                val torrentHash = torrent.optString("hash", "")
+                
+                if (torrentHash.equals(hash, ignoreCase = true)) {
+                    val files = mutableListOf<TorrentFileUtils.TorrentFile>()
+                    
+                    if (torrent.has("file_stats")) {
+                        val fileStats = torrent.getJSONArray("file_stats")
+                        for (j in 0 until fileStats.length()) {
+                            val fileStat = fileStats.getJSONObject(j)
+                            val name = fileStat.optString("path", "").substringAfterLast('/')
+                            val path = fileStat.optString("path", "")
+                            val size = fileStat.optLong("length", 0L)
+                            
+                            if (name.isNotEmpty()) {
+                                files.add(TorrentFileUtils.TorrentFile(
+                                    index = j,
+                                    name = name,
+                                    path = path,
+                                    size = size
+                                ))
+                            }
+                        }
+                    }
+                    
+                    return files
+                }
+            }
+            
+            return emptyList()
+        } catch (e: JSONException) {
+            logDebug("Ошибка парсинга списка торрентов", e.toString())
+            return emptyList()
+        }
+    }
+
+    /**
+     * Получение файлов через стандартный TorrServe API с повторами (как в desktop версии)
+     */
+    private suspend fun getFilesViaStandardAPIWithRetry(hash: String): List<TorrentFileUtils.TorrentFile> {
+        logDebug("Получение файлов через стандартный API с retry для hash: $hash")
+        
+        var retryCount = 1
+        val maxRetries = 50
+        val delay = 1000L
+        
+        while (retryCount <= maxRetries) {
+            try {
+                val requestBody = """
+                    {
+                        "action": "get",
+                        "hash": "$hash"
+                    }
+                """.trimIndent()
+                
+                logDebug("Получаем файлы торрента... попытка $retryCount/$maxRetries")
+                
+                val response = executeRequest(
+                    "POST", 
+                    getApiUrl("/torrents"), 
+                    requestBody,
+                    timeout = 30000
+                )
+                
+                if (response != null) {
+                    val jsonResponse = org.json.JSONObject(response)
+                    val stat = jsonResponse.optInt("stat", 0)
+                    
+                    logDebug("Статус торрента: $stat")
+                    
+                    if (stat == 3) { // Торрент готов (как в desktop версии)
+                        val files = parseRealFileNames(jsonResponse, hash)
+                        if (files.isNotEmpty()) {
+                            logDebug("Получено видео файлов: ${files.size}")
+                            return files
+                        } else {
+                            logDebug("В раздаче не найдены видео-файлы")
+                            return emptyList()
+                        }
+                    } else {
+                        logDebug("Торрент загружается, статус: $stat. Повтор через ${delay}мс...")
+                        kotlinx.coroutines.delay(delay)
+                        retryCount++
+                    }
+                } else {
+                    logDebug("Пустой ответ от API, повтор через ${delay}мс...")
+                    kotlinx.coroutines.delay(delay)
+                    retryCount++
+                }
+            } catch (e: Exception) {
+                logDebug("Ошибка при получении файлов (попытка $retryCount): ${e.message}")
+                kotlinx.coroutines.delay(delay)
+                retryCount++
+            }
+        }
+        
+        logDebug("Не удалось получить файлы после $maxRetries попыток")
+        return emptyList()
+    }
+    
+    /**
+     * Парсинг настоящих названий файлов (как в desktop версии)
+     */
+    private fun parseRealFileNames(jsonResponse: org.json.JSONObject, hash: String): List<TorrentFileUtils.TorrentFile> {
+        try {
+            val fileStats = jsonResponse.optJSONArray("file_stats")
+            if (fileStats != null) {
+                val files = mutableListOf<TorrentFileUtils.TorrentFile>()
+                
+                // Список видео расширений как в desktop версии
+                val videoExtensions = listOf(
+                    ".webm", ".mkv", ".flv", ".vob", ".ogv", ".ogg", ".rrc", ".gifv",
+                    ".mng", ".mov", ".avi", ".qt", ".wmv", ".yuv", ".rm", ".asf", ".amv",
+                    ".mp4", ".m4p", ".m4v", ".mpg", ".mp2", ".mpeg", ".mpe", ".mpv",
+                    ".svi", ".3gp", ".3g2", ".mxf", ".roq", ".nsv", ".f4v", ".f4p",
+                    ".f4a", ".f4b", ".mod", ".m2ts"
+                )
+                
+                for (i in 0 until fileStats.length()) {
+                    val fileObj = fileStats.getJSONObject(i)
+                    val id = fileObj.optInt("id", i)
+                    val path = fileObj.optString("path", "")
+                    val length = fileObj.optLong("length", 0L)
+                    
+                    // Проверяем является ли файл видео
+                    val isVideoFile = videoExtensions.any { ext -> 
+                        path.lowercase().endsWith(ext.lowercase()) 
+                    }
+                    
+                    if (isVideoFile && path.isNotEmpty()) {
+                        val fileName = path.substringAfterLast("/").ifEmpty { path }
+                        
+                        // Парсим сезон и серию из названия файла (но не добавляем к имени)
+                        val episodeInfo = TorrentFileUtils.parseEpisodeInfo(fileName)
+                        
+                        files.add(
+                            TorrentFileUtils.TorrentFile(
+                                index = id,
+                                name = fileName,
+                                path = path,
+                                size = length,
+                                episodeInfo = episodeInfo
+                            )
+                        )
+                        
+                        logDebug("Видео файл $id: $fileName (${length} байт)")
+                    }
+                }
+                
+                return files
+            }
+        } catch (e: Exception) {
+            logDebug("Ошибка парсинга настоящих файлов: ${e.message}")
+        }
+        
+        return emptyList()
+    }
+    
+    /**
+     * Парсинг ответа стандартного API
+     */
+    private fun parseStandardAPIResponse(response: String, hash: String): List<TorrentFileUtils.TorrentFile> {
+        try {
+            logDebug("Парсинг ответа стандартного API")
+            val jsonResponse = org.json.JSONObject(response)
+            
+            // Проверяем статус как в desktop версии
+            val stat = jsonResponse.optInt("stat", 0)
+            logDebug("Статус торрента: $stat")
+            
+            if (stat == 3) { // Торрент готов
+                val fileStats = jsonResponse.optJSONArray("file_stats")
+                if (fileStats != null) {
+                    val files = mutableListOf<TorrentFileUtils.TorrentFile>()
+                    
+                    for (i in 0 until fileStats.length()) {
+                        val fileObj = fileStats.getJSONObject(i)
+                        val id = fileObj.optInt("id", i)
+                        val path = fileObj.optString("path", "")
+                        val length = fileObj.optLong("length", 0L)
+                        
+                        logDebug("Файл $id: $path (${length} байт)")
+                        
+                        // Проверяем расширения видео файлов как в desktop версии
+                        val videoExtensions = listOf(
+                            ".webm", ".mkv", ".flv", ".vob", ".ogv", ".ogg", ".rrc", ".gifv",
+                            ".mng", ".mov", ".avi", ".qt", ".wmv", ".yuv", ".rm", ".asf", ".amv",
+                            ".mp4", ".m4p", ".m4v", ".mpg", ".mp2", ".mpeg", ".mpe", ".mpv",
+                            ".svi", ".3gp", ".3g2", ".mxf", ".roq", ".nsv", ".f4v", ".f4p",
+                            ".f4a", ".f4b", ".mod", ".m2ts"
+                        )
+                        
+                        val isVideo = videoExtensions.any { ext -> 
+                            path.lowercase().endsWith(ext.lowercase()) 
+                        }
+                        
+                        if (isVideo && path.isNotEmpty()) {
+                            val fileName = path.substringAfterLast("/").ifEmpty { path }
+                            files.add(
+                                TorrentFileUtils.TorrentFile(
+                                    index = id,
+                                    name = fileName,
+                                    path = path,
+                                    size = length
+                                )
+                            )
+                        }
+                    }
+                    
+                    logDebug("Найдено видео файлов через стандартный API: ${files.size}")
+                    return files
+                }
+            } else {
+                logDebug("Торрент не готов, статус: $stat")
+            }
+        } catch (e: Exception) {
+            logDebug("Ошибка парсинга стандартного API: ${e.message}")
+        }
+        
+        return emptyList()
+    }
+    
+
+
+
 
     /**
      * Запускает воспроизведение по hash торрента

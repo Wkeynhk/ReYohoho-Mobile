@@ -104,6 +104,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.Dispatchers
 import com.example.reyohoho.ui.TorrServeManager
+import com.example.reyohoho.ui.TorrentFilesScreen
+import com.example.reyohoho.ui.TorrentFileUtils
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -134,6 +136,24 @@ class MainActivity : ComponentActivity() {
     private var currentWebView: WebView? = null
     
     private val STORAGE_PERMISSION_CODE = 1001
+    private val PERMISSIONS_REQUEST_CODE = 1002
+    
+    // Список разрешений для запроса
+    private val requiredPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        arrayOf(
+            Manifest.permission.POST_NOTIFICATIONS,
+            Manifest.permission.MANAGE_EXTERNAL_STORAGE
+        )
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        arrayOf(
+            Manifest.permission.MANAGE_EXTERNAL_STORAGE
+        )
+    } else {
+        arrayOf(
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+        )
+    }
     
     // Переменная для хранения состояния PiP
     private var isInPipMode = false
@@ -146,19 +166,9 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("InlinedApi")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Запрос разрешения на уведомления для Android 13+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val permission = android.Manifest.permission.POST_NOTIFICATIONS
-            val granted = ContextCompat.checkSelfPermission(this, permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                ActivityCompat.requestPermissions(this, arrayOf(permission), 2001)
-            }
-        }
+        
         // Запуск фоновой проверки обновлений
         com.example.reyohoho.ui.scheduleUpdateCheckWorker(this)
-        
-        // Проверяем и запрашиваем разрешения
-        checkAndRequestPermissions()
         
         val openAbout = intent.getBooleanExtra("open_about", false)
         if (openAbout) {
@@ -207,6 +217,9 @@ class MainActivity : ComponentActivity() {
             
             val appVersion = packageManager.getPackageInfo(packageName, 0).versionName!!
             
+            // Запрашиваем разрешения при первом запуске
+            requestPermissionsIfNeeded()
+            
             setContent {
                 // Всегда используем темную тему независимо от настроек системы
                 ReYohohoTheme(darkTheme = true) {
@@ -236,6 +249,9 @@ class MainActivity : ComponentActivity() {
                     val selectedMirror by settingsManager.siteMirrorFlow.collectAsState()
                     val showSettingsButtonOnlyOnSettingsPage by settingsManager.showSettingsButtonOnlyOnSettingsPageFlow.collectAsState()
                     var currentUrl by remember { mutableStateOf(finalUrl) }
+                    
+                    // Состояние для управления разрешениями  
+                    var showPermissionsDialog by remember { mutableStateOf(false) }
                     
                     // Обновляем URL при изменении зеркала
                     LaunchedEffect(selectedMirror) {
@@ -424,17 +440,109 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    @Deprecated("Deprecated in Java")
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<String>,
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == STORAGE_PERMISSION_CODE) {
+        
+        when (requestCode) {
+            STORAGE_PERMISSION_CODE -> {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Log.d("MainActivity", "Разрешение на доступ к хранилищу получено")
             } else {
                 Log.e("MainActivity", "Разрешение на доступ к хранилищу отклонено")
+                }
+            }
+            PERMISSIONS_REQUEST_CODE -> {
+                val prefs = getSharedPreferences("app_permissions", Context.MODE_PRIVATE)
+                
+                // Проверяем результаты для всех разрешений
+                val deniedPermissions = mutableListOf<String>()
+                for (i in permissions.indices) {
+                    if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
+                        deniedPermissions.add(permissions[i])
+                    }
+                }
+                
+                if (deniedPermissions.isNotEmpty()) {
+                    // Сохраняем информацию о том, что пользователь отказался от разрешений
+                    prefs.edit().putBoolean("permissions_denied", true).apply()
+                    Log.d("MainActivity", "Некоторые разрешения отклонены: $deniedPermissions")
+                } else {
+                    Log.d("MainActivity", "Все разрешения получены")
+                }
+            }
+        }
+    }
+    
+    /**
+     * Запрос разрешений при первом запуске
+     */
+    private fun requestPermissionsIfNeeded() {
+        val prefs = getSharedPreferences("app_permissions", Context.MODE_PRIVATE)
+        val permissionsDenied = prefs.getBoolean("permissions_denied", false)
+        
+        // Если пользователь уже отказался от разрешений, не показываем запрос
+        if (permissionsDenied) {
+            Log.d("MainActivity", "Разрешения были отклонены ранее, не запрашиваем повторно")
+            return
+        }
+        
+        // Для Android 11+ сначала запрашиваем MANAGE_EXTERNAL_STORAGE через настройки
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                requestManageAllFilesPermission()
+            }
+        }
+        
+        // Проверяем остальные разрешения
+        val permissionsToRequest = mutableListOf<String>()
+        
+        for (permission in requiredPermissions) {
+            // Пропускаем MANAGE_EXTERNAL_STORAGE, так как он обрабатывается отдельно
+            if (permission == Manifest.permission.MANAGE_EXTERNAL_STORAGE) {
+                continue
+            }
+            
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(permission)
+            }
+        }
+        
+        // Запрашиваем только недостающие разрешения
+        if (permissionsToRequest.isNotEmpty()) {
+            Log.d("MainActivity", "Запрашиваем разрешения: $permissionsToRequest")
+            ActivityCompat.requestPermissions(
+                this,
+                permissionsToRequest.toTypedArray(),
+                PERMISSIONS_REQUEST_CODE
+            )
+        } else {
+            Log.d("MainActivity", "Все необходимые разрешения уже предоставлены")
+        }
+    }
+    
+    /**
+     * Запрос разрешения на управление всеми файлами (Android 11+)
+     */
+    private fun requestManageAllFilesPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                intent.data = android.net.Uri.parse("package:$packageName")
+                startActivityForResult(intent, STORAGE_PERMISSION_CODE)
+                Log.d("MainActivity", "Запрашиваем разрешение на доступ ко всем файлам")
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Ошибка при запросе разрешения на все файлы: ${e.message}")
+                // Fallback - запрашиваем через стандартный диалог
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE),
+                    STORAGE_PERMISSION_CODE
+                )
             }
         }
     }
@@ -1287,9 +1395,18 @@ fun JacredScreen(
     val coroutineScope = rememberCoroutineScope()
     var webView by remember { mutableStateOf<WebView?>(null) }
     var urlLoaded by remember { mutableStateOf(false) }
+    var showFilesDialog by remember { mutableStateOf(false) }
+    var selectedMagnetUrl by remember { mutableStateOf("") }
+    var selectedTorrentHash by remember { mutableStateOf("") }
 
     // BackHandler для jacred
-    BackHandler(enabled = true) { onClose() }
+    BackHandler(enabled = true) { 
+        if (showFilesDialog) {
+            showFilesDialog = false
+        } else {
+            onClose()
+        }
+    }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         // WebView
         AndroidView(
@@ -1313,27 +1430,24 @@ fun JacredScreen(
                                 view?.evaluateJavascript("document.getElementById('s').value = 'kp$kpId'; document.getElementById('submitButton').click();", null)
                             }
 
-                            // Добавляем JavaScript для добавления кнопки "Смотреть" к результатам
+                            // Добавляем простой JavaScript только для кнопки "Смотреть"
                             view?.evaluateJavascript("""
                                 (function() {
-                                    // Функция для добавления кнопок к результатам
+                                    
+                                    // Функция добавления кнопки "Смотреть" к результатам
                                     function addWatchButtons() {
-                                        // Находим все результаты с магнет-ссылками
                                         const results = document.querySelectorAll('.webResult');
                                         
                                         results.forEach(result => {
-                                            // Проверяем, есть ли уже кнопка "Смотреть"
                                             if (result.querySelector('.watch-button')) {
                                                 return;
                                             }
                                             
-                                            // Находим магнет-ссылку
                                             const magnetLink = result.querySelector('.magneto');
                                             if (!magnetLink || !magnetLink.href || !magnetLink.href.startsWith('magnet:')) {
                                                 return;
                                             }
                                             
-                                            // Находим блок с размером для позиционирования кнопки
                                             const sizeElement = result.querySelector('.size');
                                             if (!sizeElement) {
                                                 return;
@@ -1344,16 +1458,15 @@ fun JacredScreen(
                                             watchButton.className = 'watch-button';
                                             watchButton.href = '#';
                                             watchButton.textContent = 'Смотреть';
-                                            watchButton.style.marginRight = '10px';
+                                            watchButton.style.marginRight = '8px';
                                             watchButton.style.color = '#4CAF50';
                                             watchButton.style.fontWeight = 'bold';
+                                            watchButton.style.textDecoration = 'none';
                                             
-                                            // Добавляем обработчик события клика
                                             watchButton.onclick = function(e) {
                                                 e.preventDefault();
                                                 e.stopPropagation();
                                                 
-                                                // Передаем магнет-ссылку в Android
                                                 if (window.Android) {
                                                     window.Android.addMagnetToTorrServe(magnetLink.href);
                                                 }
@@ -1366,30 +1479,29 @@ fun JacredScreen(
                                         });
                                     }
                                     
-                                    // Запускаем функцию сразу
-                                    addWatchButtons();
-                                    
-                                    // И через интервал, так как результаты могут загружаться асинхронно
-                                    setInterval(addWatchButtons, 1000);
-                                    
                                     // Стили для кнопки
                                     const style = document.createElement('style');
                                     style.textContent = `
                                         .watch-button {
                                             display: inline-block;
-                                            padding: 2px 8px;
+                                            padding: 4px 12px;
                                             background-color: rgba(0, 0, 0, 0.7);
                                             border-radius: 4px;
                                             text-decoration: none !important;
                                             transition: all 0.3s ease;
                                             z-index: 1000;
                                         }
+                                        
                                         .watch-button:hover {
                                             background-color: #4CAF50;
                                             color: white !important;
                                         }
                                     `;
                                     document.head.appendChild(style);
+                                    
+                                    // Инициализация
+                                    addWatchButtons();
+                                    setInterval(addWatchButtons, 1000);
                                 })();
                             """, null)
                         }
@@ -1424,9 +1536,34 @@ fun JacredScreen(
                             Log.d("JacredScreen", "Получена магнет-ссылка: $magnetUrl")
                             coroutineScope.launch(Dispatchers.Main) {
                                 Toast.makeText(context, "Добавление торрента...", Toast.LENGTH_SHORT).show()
-                                val success = torrServeManager.addAndPlay(magnetUrl)
-                                if (!success) {
-                                    Toast.makeText(context, "Ошибка при добавлении торрента", Toast.LENGTH_LONG).show()
+                                
+                                // Добавляем торрент и получаем хеш
+                                val hash = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                    torrServeManager.addTorrent(magnetUrl)
+                                }
+                                
+                                if (hash != null) {
+                                    // Получаем список файлов
+                                    Toast.makeText(context, "Получение списка файлов...", Toast.LENGTH_SHORT).show()
+                                    val files = kotlinx.coroutines.withContext(Dispatchers.IO) { 
+                                        torrServeManager.getTorrentFiles(hash) 
+                                    }
+                                    val videoFiles = TorrentFileUtils.processVideoFiles(files)
+                                    
+                                    if (videoFiles.size == 1) {
+                                        // Один файл - сразу запускаем
+                                        Toast.makeText(context, "Запуск воспроизведения...", Toast.LENGTH_SHORT).show()
+                                        torrServeManager.playTorrent(hash, videoFiles[0].index)
+                                    } else if (videoFiles.size > 1) {
+                                        // Несколько файлов - показываем меню выбора
+                                        selectedMagnetUrl = magnetUrl
+                                        selectedTorrentHash = hash
+                                        showFilesDialog = true
+                                    } else {
+                                        Toast.makeText(context, "Видео файлы не найдены", Toast.LENGTH_LONG).show()
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Не удалось добавить торрент", Toast.LENGTH_LONG).show()
                                 }
                             }
                         }
@@ -1441,7 +1578,13 @@ fun JacredScreen(
         )
         // Кнопка назад
         androidx.compose.material3.IconButton(
-            onClick = { onClose() },
+            onClick = { 
+                if (showFilesDialog) {
+                    showFilesDialog = false
+                } else {
+                    onClose()
+                }
+            },
             modifier = Modifier
                 .padding(16.dp)
                 .align(Alignment.TopStart)
@@ -1453,6 +1596,23 @@ fun JacredScreen(
                 contentDescription = "Назад",
                 tint = Color.White,
                 modifier = Modifier.size(32.dp)
+            )
+        }
+        
+        // Диалог выбора файлов
+        if (showFilesDialog && selectedTorrentHash.isNotEmpty()) {
+            TorrentFilesScreen(
+                magnetUrl = selectedMagnetUrl,
+                torrentHash = selectedTorrentHash,
+                onClose = { showFilesDialog = false },
+                onFileSelected = { fileIndex: Int, fileName: String ->
+                    coroutineScope.launch {
+                        showFilesDialog = false
+                        Toast.makeText(context, "Запускаем: $fileName", Toast.LENGTH_SHORT).show()
+                        torrServeManager.playTorrent(selectedTorrentHash, fileIndex)
+                    }
+                },
+                settingsManager = settingsManager
             )
         }
     }
