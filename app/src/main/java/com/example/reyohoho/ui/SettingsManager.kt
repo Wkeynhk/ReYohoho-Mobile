@@ -44,12 +44,17 @@ class SettingsManager(context: Context) {
         private const val KEY_TORRENT_BUTTON_BOTTOM = "torrent_button_bottom"
         private const val KEY_USE_INTERNAL_TORRSERVE = "use_internal_torrserve"
         private const val KEY_EXTERNAL_TORRSERVE_URL = "external_torrserve_url"
+        private const val KEY_TORR_SERVER_MODE = "torr_server_mode"
+        private const val KEY_FREE_TORR_ENABLED = "free_torr_enabled"
+        private const val KEY_FREE_TORR_SERVER_URL = "free_torr_server_url"
         private const val KEY_ADBLOCK_DISABLED = "adblock_disabled"
         private const val KEY_HIDE_TORRENT_VIP_INFO = "hide_torrent_vip_info"
         const val DEVICE_TYPE_ANDROID = "android"
         const val DEVICE_TYPE_ANDROID_TV = "android_tv"
         const val ADBLOCK_SOURCE_INTERNET = "internet"
         const val ADBLOCK_SOURCE_LOCAL = "local"
+        const val TORR_SERVER_MODE_CUSTOM = "custom"
+        const val TORR_SERVER_MODE_FREE_TORR = "free_torr"
         private const val DEFAULT_EXTERNAL_TORRSERVE_URL = "http://localhost:8090/"
 
         // Синглтон для доступа к настройкам из любой части приложения
@@ -184,6 +189,72 @@ class SettingsManager(context: Context) {
     fun setExternalTorrServeUrl(url: String) {
         prefs.edit().putString(KEY_EXTERNAL_TORRSERVE_URL, url).apply()
         _externalTorrServeUrlFlow.value = url
+    }
+
+    // StateFlow для режима торрент-сервера
+    private val _torrServerModeFlow = MutableStateFlow(getTorrServerMode())
+    val torrServerModeFlow: StateFlow<String> = _torrServerModeFlow.asStateFlow()
+    
+    // StateFlow для включения FreeTorr
+    private val _freeTorrEnabledFlow = MutableStateFlow(isFreeTorrEnabled())
+    val freeTorrEnabledFlow: StateFlow<Boolean> = _freeTorrEnabledFlow.asStateFlow()
+    
+    // StateFlow для URL FreeTorr сервера
+    private val _freeTorrServerUrlFlow = MutableStateFlow(getFreeTorrServerUrl())
+    val freeTorrServerUrlFlow: StateFlow<String> = _freeTorrServerUrlFlow.asStateFlow()
+    
+
+    
+    /**
+     * Возвращает режим торрент-сервера
+     */
+    fun getTorrServerMode(): String {
+        return prefs.getString(KEY_TORR_SERVER_MODE, TORR_SERVER_MODE_CUSTOM) ?: TORR_SERVER_MODE_CUSTOM
+    }
+    
+    /**
+     * Устанавливает режим торрент-сервера
+     */
+    fun setTorrServerMode(mode: String) {
+        prefs.edit().putString(KEY_TORR_SERVER_MODE, mode).apply()
+        _torrServerModeFlow.value = mode
+    }
+    
+    /**
+     * Проверяет, включен ли FreeTorr
+     */
+    fun isFreeTorrEnabled(): Boolean {
+        return prefs.getBoolean(KEY_FREE_TORR_ENABLED, false)
+    }
+    
+    /**
+     * Устанавливает включение FreeTorr
+     */
+    fun setFreeTorrEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_FREE_TORR_ENABLED, enabled).apply()
+        _freeTorrEnabledFlow.value = enabled
+    }
+    
+    /**
+     * Проверяет, включено ли автоматическое переключение серверов (всегда true)
+     */
+    fun isAutoSwitchServersEnabled(): Boolean {
+        return true
+    }
+    
+    /**
+     * Возвращает URL FreeTorr сервера
+     */
+    fun getFreeTorrServerUrl(): String {
+        return prefs.getString(KEY_FREE_TORR_SERVER_URL, "http://localhost:8090/") ?: "http://localhost:8090/"
+    }
+    
+    /**
+     * Устанавливает URL FreeTorr сервера
+     */
+    fun setFreeTorrServerUrl(url: String) {
+        prefs.edit().putString(KEY_FREE_TORR_SERVER_URL, url).apply()
+        _freeTorrServerUrlFlow.value = url
     }
     
     /**

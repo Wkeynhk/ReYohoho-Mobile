@@ -1393,6 +1393,25 @@ fun JacredScreen(
     val disableZoom = settingsManager.disableZoomFlow.collectAsState().value
     val torrServeManager = remember { TorrServeManager.getInstance(context) }
     val coroutineScope = rememberCoroutineScope()
+    
+    // Инициализация FreeTorr при запуске
+    LaunchedEffect(Unit) {
+        val serverMode = settingsManager.getTorrServerMode()
+        val freeTorrEnabled = settingsManager.isFreeTorrEnabled()
+        
+        if (serverMode == SettingsManager.TORR_SERVER_MODE_FREE_TORR && freeTorrEnabled) {
+            try {
+                val success = torrServeManager.initializeFreeTorrServer()
+                if (success) {
+                    Log.d("MainActivity", "FreeTorr сервер успешно инициализирован")
+                } else {
+                    Log.w("MainActivity", "Не удалось инициализировать FreeTorr сервер")
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Ошибка инициализации FreeTorr", e)
+            }
+        }
+    }
     var webView by remember { mutableStateOf<WebView?>(null) }
     var urlLoaded by remember { mutableStateOf(false) }
     var showFilesDialog by remember { mutableStateOf(false) }
@@ -1535,35 +1554,42 @@ fun JacredScreen(
                         fun addMagnetToTorrServe(magnetUrl: String) {
                             Log.d("JacredScreen", "Получена магнет-ссылка: $magnetUrl")
                             coroutineScope.launch(Dispatchers.Main) {
-                                Toast.makeText(context, "Добавление торрента...", Toast.LENGTH_SHORT).show()
-                                
-                                // Добавляем торрент и получаем хеш
-                                val hash = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                                    torrServeManager.addTorrent(magnetUrl)
-                                }
-                                
-                                if (hash != null) {
-                                    // Получаем список файлов
-                                    Toast.makeText(context, "Получение списка файлов...", Toast.LENGTH_SHORT).show()
-                                    val files = kotlinx.coroutines.withContext(Dispatchers.IO) { 
-                                        torrServeManager.getTorrentFiles(hash) 
-                                    }
-                                    val videoFiles = TorrentFileUtils.processVideoFiles(files)
+                                try {
+                                    Toast.makeText(context, "Добавление торрента...", Toast.LENGTH_SHORT).show()
                                     
-                                    if (videoFiles.size == 1) {
-                                        // Один файл - сразу запускаем
-                                        Toast.makeText(context, "Запуск воспроизведения...", Toast.LENGTH_SHORT).show()
-                                        torrServeManager.playTorrent(hash, videoFiles[0].index)
-                                    } else if (videoFiles.size > 1) {
-                                        // Несколько файлов - показываем меню выбора
-                                        selectedMagnetUrl = magnetUrl
-                                        selectedTorrentHash = hash
-                                        showFilesDialog = true
-                                    } else {
-                                        Toast.makeText(context, "Видео файлы не найдены", Toast.LENGTH_LONG).show()
+                                    // Добавляем торрент и получаем хеш
+                                    val hash = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                        torrServeManager.addTorrent(magnetUrl)
                                     }
-                                } else {
-                                    Toast.makeText(context, "Не удалось добавить торрент", Toast.LENGTH_LONG).show()
+                                    
+                                    if (hash != null && hash.isNotEmpty()) {
+                                        // Получаем список файлов
+                                        Toast.makeText(context, "Получение списка файлов...", Toast.LENGTH_SHORT).show()
+                                        val files = kotlinx.coroutines.withContext(Dispatchers.IO) { 
+                                            torrServeManager.getTorrentFiles(hash) 
+                                        }
+                                        val videoFiles = TorrentFileUtils.processVideoFiles(files)
+                                        
+                                        if (videoFiles.size == 1) {
+                                            // Один файл - сразу запускаем
+                                            Toast.makeText(context, "Запуск воспроизведения...", Toast.LENGTH_SHORT).show()
+                                            kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                                torrServeManager.playTorrent(hash, videoFiles[0].index)
+                                            }
+                                        } else if (videoFiles.size > 1) {
+                                            // Несколько файлов - показываем меню выбора
+                                            selectedMagnetUrl = magnetUrl
+                                            selectedTorrentHash = hash
+                                            showFilesDialog = true
+                                        } else {
+                                            Toast.makeText(context, "Видео файлы не найдены", Toast.LENGTH_LONG).show()
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "Не удалось добавить торрент", Toast.LENGTH_LONG).show()
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("JacredScreen", "Ошибка при обработке торрента", e)
+                                    Toast.makeText(context, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
                                 }
                             }
                         }

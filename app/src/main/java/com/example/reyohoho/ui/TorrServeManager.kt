@@ -52,6 +52,7 @@ class TorrServeManager(private val context: Context) {
     }
 
     private val settingsManager = SettingsManager.getInstance(context)
+    private val freeTorrManager = FreeTorrManager.getInstance(context)
     private var isDebugEnabled = true // Включаем расширенное логирование
     private var detectedApiVersion: ApiVersion = ApiVersion.UNKNOWN
     private var isMatrixServer = false
@@ -61,11 +62,27 @@ class TorrServeManager(private val context: Context) {
      * Возвращает базовый URL TorrServe
      */
     private fun getTorrServeBaseUrl(): String {
-        val externalUrl = settingsManager.getExternalTorrServeUrl()
-        return if (externalUrl.endsWith("/")) {
-            externalUrl.dropLast(1)
-        } else {
-            externalUrl
+        val serverMode = settingsManager.getTorrServerMode()
+        
+        return when (serverMode) {
+            SettingsManager.TORR_SERVER_MODE_FREE_TORR -> {
+                // Для FreeTorr используем специальный URL
+                val freeTorrUrl = settingsManager.getFreeTorrServerUrl()
+                if (freeTorrUrl.endsWith("/")) {
+                    freeTorrUrl.dropLast(1)
+                } else {
+                    freeTorrUrl
+                }
+            }
+            else -> {
+                // Для пользовательского сервера
+                val externalUrl = settingsManager.getExternalTorrServeUrl()
+                if (externalUrl.endsWith("/")) {
+                    externalUrl.dropLast(1)
+                } else {
+                    externalUrl
+                }
+            }
         }
     }
 
@@ -445,6 +462,26 @@ class TorrServeManager(private val context: Context) {
             }
             
             logDebug("Ошибка при выполнении запроса $method $urlString", errorDetails)
+            
+            // Автоматическое переключение сервера при ошибках для FreeTorr
+            val serverMode = settingsManager.getTorrServerMode()
+            val autoSwitchEnabled = settingsManager.isAutoSwitchServersEnabled()
+            
+            if (serverMode == SettingsManager.TORR_SERVER_MODE_FREE_TORR && autoSwitchEnabled) {
+                logDebug("Попытка автоматического переключения FreeTorr сервера...")
+                try {
+                    val newServerUrl = freeTorrManager.switchToNewServer()
+                    if (newServerUrl != null) {
+                        logDebug("Автоматически переключен на новый сервер: $newServerUrl")
+                        // Не возвращаем null, чтобы запрос мог быть повторен с новым сервером
+                    } else {
+                        logDebug("Не удалось автоматически переключить сервер")
+                    }
+                } catch (switchError: Exception) {
+                    logDebug("Ошибка при автоматическом переключении сервера", switchError.message)
+                }
+            }
+            
             return@withContext null
         } finally {
             try {
@@ -567,6 +604,32 @@ class TorrServeManager(private val context: Context) {
         if (!isNetworkAvailable()) {
             logDebug("Нет подключения к интернету при добавлении торрента")
             return@withContext null
+        }
+
+        // Проверяем доступность сервера перед добавлением торрента
+        val serverMode = settingsManager.getTorrServerMode()
+        if (serverMode == SettingsManager.TORR_SERVER_MODE_FREE_TORR) {
+            val currentServerUrl = settingsManager.getFreeTorrServerUrl()
+            if (currentServerUrl != "http://localhost:8090/") {
+                val isServerAvailable = freeTorrManager.checkServerAvailability(currentServerUrl)
+                
+                if (!isServerAvailable) {
+                    logDebug("Текущий FreeTorr сервер недоступен, ищем новый...")
+                    val newServerFound = autoSwitchServer()
+                    if (!newServerFound) {
+                        logDebug("Не удалось найти доступный сервер для добавления торрента")
+                        // Возвращаем хеш даже если сервер недоступен, чтобы можно было попробовать воспроизвести
+                    }
+                }
+            } else {
+                // Если сервер не инициализирован, инициализируем его
+                logDebug("FreeTorr сервер не инициализирован, инициализируем...")
+                val initialized = initializeFreeTorrServer()
+                if (!initialized) {
+                    logDebug("Не удалось инициализировать FreeTorr сервер")
+                    // Возвращаем хеш даже если сервер недоступен
+                }
+            }
         }
 
         logDebug("Добавление торрента: $magnetLink")
@@ -1057,7 +1120,22 @@ class TorrServeManager(private val context: Context) {
                 return@withContext false
             }
             val hash = withContext(Dispatchers.IO) { addTorrent(magnetUrl) }
-            if (hash != null) {
+            if (hash != null && hash.isNotEmpty()) {
+                // Проверяем доступность сервера перед воспроизведением
+                val serverMode = settingsManager.getTorrServerMode()
+                if (serverMode == SettingsManager.TORR_SERVER_MODE_FREE_TORR) {
+                    val currentServerUrl = settingsManager.getFreeTorrServerUrl()
+                    if (currentServerUrl != "http://localhost:8090/") {
+                        val isServerAvailable = withContext(Dispatchers.IO) {
+                            freeTorrManager.checkServerAvailability(currentServerUrl)
+                        }
+                        if (!isServerAvailable) {
+                            Toast.makeText(context, "Сервер недоступен, попробуйте сменить адрес", Toast.LENGTH_LONG).show()
+                            return@withContext false
+                        }
+                    }
+                }
+                
                 // Для Matrix API торрент сразу готов, для остальных ждем
                 val ready = if (isMatrixServer) {
                     logDebug("Matrix API - торрент готов сразу")
@@ -1068,7 +1146,9 @@ class TorrServeManager(private val context: Context) {
                     }
                 }
                 logDebug("Торрент ${if (ready) "готов" else "не готов"} к воспроизведению, запускаем плеер")
-                playTorrent(hash)
+                withContext(Dispatchers.IO) {
+                    playTorrent(hash)
+                }
                 return@withContext true
             } else {
                 val message = "Не удалось добавить торрент. Проверьте настройки TorrServe."
@@ -1473,46 +1553,50 @@ class TorrServeManager(private val context: Context) {
                 return
             }
             
+            // Проверяем доступность сервера перед воспроизведением
+            val serverMode = settingsManager.getTorrServerMode()
+            if (serverMode == SettingsManager.TORR_SERVER_MODE_FREE_TORR) {
+                val currentServerUrl = settingsManager.getFreeTorrServerUrl()
+                if (currentServerUrl != "http://localhost:8090/") {
+                    val isServerAvailable = freeTorrManager.checkServerAvailability(currentServerUrl)
+                    
+                    if (!isServerAvailable) {
+                        logDebug("Текущий FreeTorr сервер недоступен, ищем новый...")
+                        val newServerFound = autoSwitchServer()
+                        if (!newServerFound) {
+                            Toast.makeText(context, "Не удалось найти доступный сервер", Toast.LENGTH_LONG).show()
+                            return
+                        }
+                    }
+                } else {
+                    // Если сервер не установлен, инициализируем его
+                    logDebug("FreeTorr сервер не инициализирован, инициализируем...")
+                    val initialized = initializeFreeTorrServer()
+                    if (!initialized) {
+                        Toast.makeText(context, "Не удалось инициализировать FreeTorr сервер", Toast.LENGTH_LONG).show()
+                        return
+                    }
+                }
+            }
+            
             // Получаем URL для воспроизведения
             val playUrl = getPlaybackUrl(hash, fileIndex)
             
             logDebug("Запуск воспроизведения: $playUrl")
             
-            // Проверка доступности URL перед запуском плеера
-            if (isMatrixServer) {
-                try {
-                    // Для Matrix выполняем HEAD-запрос чтобы убедиться, что URL работает
-                    withContext(Dispatchers.IO) {
-                        val connection = URL(playUrl).openConnection() as HttpURLConnection
-                        connection.requestMethod = "HEAD"
-                        connection.connectTimeout = 5000
-                        connection.readTimeout = 5000
-                        val responseCode = connection.responseCode
-                        connection.disconnect()
-                        
-                        if (responseCode >= 400) {
-                            logDebug("URL для воспроизведения недоступен, код: $responseCode")
-                            throw Exception("Сервер вернул ошибку: $responseCode")
-                        }
-                    }
-                } catch (e: Exception) {
-                    logDebug("Не удалось проверить URL для воспроизведения", e.toString())
-                    // Продолжаем, так как не все серверы поддерживают HEAD-запросы
-                }
-            }
-            
             // Безопасно запускаем плеер на главном потоке
             withContext(Dispatchers.Main) {
-                // Создаем Intent для открытия внешнего плеера
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(Uri.parse(playUrl), "video/*")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                
                 try {
+                    // Создаем Intent для открытия внешнего плеера
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(Uri.parse(playUrl), "video/*")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    
                     // Запускаем плеер
                     context.startActivity(intent)
                     logDebug("Запущен плеер для hash: $hash, fileIndex: $fileIndex")
+                    
                 } catch (e: Exception) {
                     logDebug("Ошибка при запуске плеера через Intent", e.toString())
                     Toast.makeText(context, "Не найдено приложение для воспроизведения видео", Toast.LENGTH_LONG).show()
@@ -1523,5 +1607,182 @@ class TorrServeManager(private val context: Context) {
             e.printStackTrace()
             Toast.makeText(context, "Ошибка при запуске плеера: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    /**
+     * Инициализирует FreeTorr сервер при первом запуске
+     */
+    suspend fun initializeFreeTorrServer(): Boolean {
+        val serverMode = settingsManager.getTorrServerMode()
+        if (serverMode != SettingsManager.TORR_SERVER_MODE_FREE_TORR) {
+            return false
+        }
+
+        logDebug("Инициализация FreeTorr сервера...")
+        
+        // Сначала проверяем текущий сервер, если он есть
+        val currentServerUrl = settingsManager.getFreeTorrServerUrl()
+        if (currentServerUrl != "http://localhost:8090/") {
+            logDebug("Проверяем текущий сервер: $currentServerUrl")
+            val isCurrentAvailable = freeTorrManager.checkServerAvailability(currentServerUrl)
+            if (isCurrentAvailable) {
+                logDebug("Текущий сервер доступен, используем его: $currentServerUrl")
+                return true
+            } else {
+                logDebug("Текущий сервер недоступен, ищем новый...")
+            }
+        }
+        
+        // Пытаемся найти доступный сервер с тщательной проверкой
+        var attempts = 0
+        val maxAttempts = 15 // Увеличиваем количество попыток
+        
+        while (attempts < maxAttempts) {
+            attempts++
+            logDebug("Попытка $attempts из $maxAttempts найти доступный FreeTorr сервер...")
+            
+            try {
+                val newServerUrl = freeTorrManager.getRandomTorrServer()
+                if (newServerUrl != null) {
+                    // Тщательно проверяем доступность сервера
+                    val isAvailable = freeTorrManager.checkServerAvailability(newServerUrl)
+                    if (isAvailable) {
+                        logDebug("Найден стабильный FreeTorr сервер: $newServerUrl")
+                        return true
+                    } else {
+                        logDebug("Сервер $newServerUrl нестабилен, пробуем следующий...")
+                    }
+                }
+                
+                // Увеличиваем задержку между попытками
+                delay(2000)
+                
+            } catch (e: Exception) {
+                logDebug("Ошибка при попытке $attempts: ${e.message}")
+                delay(2000)
+            }
+        }
+        
+        logDebug("Не удалось найти стабильный FreeTorr сервер после $maxAttempts попыток")
+        return false
+    }
+
+    /**
+     * Автоматически переключает на новый сервер при ошибке
+     */
+    suspend fun autoSwitchServer(): Boolean {
+        val serverMode = settingsManager.getTorrServerMode()
+        val autoSwitchEnabled = settingsManager.isAutoSwitchServersEnabled()
+        
+        if (serverMode != SettingsManager.TORR_SERVER_MODE_FREE_TORR || !autoSwitchEnabled) {
+            return false
+        }
+
+        logDebug("Автоматическое переключение FreeTorr сервера...")
+        
+        // Сначала проверяем текущий сервер
+        val currentServerUrl = settingsManager.getFreeTorrServerUrl()
+        if (currentServerUrl != "http://localhost:8090/") {
+            logDebug("Проверяем текущий сервер перед переключением: $currentServerUrl")
+            val isCurrentAvailable = freeTorrManager.checkServerAvailability(currentServerUrl)
+            if (isCurrentAvailable) {
+                logDebug("Текущий сервер работает, переключение не требуется")
+                return true
+            } else {
+                logDebug("Текущий сервер недоступен, ищем новый...")
+            }
+        }
+        
+        // Ищем новый стабильный сервер
+        var attempts = 0
+        val maxAttempts = 10
+        
+        while (attempts < maxAttempts) {
+            attempts++
+            logDebug("Попытка $attempts из $maxAttempts найти новый стабильный сервер...")
+            
+            try {
+                val newServerUrl = freeTorrManager.getRandomTorrServer()
+                if (newServerUrl != null) {
+                    // Тщательно проверяем новый сервер
+                    val isAvailable = freeTorrManager.checkServerAvailability(newServerUrl)
+                    if (isAvailable) {
+                        logDebug("Найден новый стабильный сервер: $newServerUrl")
+                        return true
+                    } else {
+                        logDebug("Новый сервер $newServerUrl нестабилен, пробуем следующий...")
+                    }
+                }
+                
+                delay(1500)
+                
+            } catch (e: Exception) {
+                logDebug("Ошибка при поиске нового сервера: ${e.message}")
+                delay(1500)
+            }
+        }
+        
+        logDebug("Не удалось найти стабильный сервер для переключения")
+        return false
+    }
+
+    /**
+     * Принудительно переключает на новый сервер (без проверки текущего)
+     */
+    suspend fun forceSwitchServer(): Boolean {
+        val serverMode = settingsManager.getTorrServerMode()
+        
+        if (serverMode != SettingsManager.TORR_SERVER_MODE_FREE_TORR) {
+            return false
+        }
+
+        logDebug("Принудительное переключение FreeTorr сервера...")
+        
+        // Ищем новый стабильный сервер
+        var attempts = 0
+        val maxAttempts = 10
+        
+        while (attempts < maxAttempts) {
+            attempts++
+            logDebug("Попытка $attempts из $maxAttempts найти новый стабильный сервер...")
+            
+            try {
+                val newServerUrl = freeTorrManager.getRandomTorrServer()
+                if (newServerUrl != null) {
+                    // Тщательно проверяем новый сервер
+                    val isAvailable = freeTorrManager.checkServerAvailability(newServerUrl)
+                    if (isAvailable) {
+                        logDebug("Найден новый стабильный сервер: $newServerUrl")
+                        return true
+                    } else {
+                        logDebug("Новый сервер $newServerUrl нестабилен, пробуем следующий...")
+                    }
+                }
+                
+                delay(1500)
+                
+            } catch (e: Exception) {
+                logDebug("Ошибка при поиске нового сервера: ${e.message}")
+                delay(1500)
+            }
+        }
+        
+        logDebug("Не удалось найти стабильный сервер для переключения")
+        return false
+    }
+
+    /**
+     * Проверяет доступность текущего сервера
+     */
+    suspend fun checkCurrentServerAvailability(): Boolean {
+        val baseUrl = getTorrServeBaseUrl()
+        return freeTorrManager.checkServerAvailability(baseUrl)
+    }
+
+    /**
+     * Получает JavaScript код для интеграции с FreeTorr
+     */
+    fun getFreeTorrJavaScript(): String {
+        return freeTorrManager.getFreeTorrJavaScript()
     }
 } 

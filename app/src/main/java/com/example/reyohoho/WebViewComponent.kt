@@ -47,6 +47,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import com.example.reyohoho.ui.SettingsManager
+import com.example.reyohoho.ui.TorrServeManager
 import java.io.ByteArrayInputStream
 import kotlinx.coroutines.launch
 
@@ -97,6 +98,48 @@ class AdBlockerJSInterface(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Ошибка при переходе в режим PiP из JS: ${e.message}")
         }
+    }
+}
+
+/**
+ * JavaScript-интерфейс для работы с FreeTorr
+ */
+class FreeTorrJSInterface(private val context: Context) {
+    private val TAG = "FreeTorrJS"
+    private val settingsManager = SettingsManager.getInstance(context)
+    private val torrServeManager = TorrServeManager.getInstance(context)
+    
+    @JavascriptInterface
+    fun onTorrServerChanged(newServerUrl: String) {
+        Log.d(TAG, "Получен новый торрент-сервер от FreeTorr: $newServerUrl")
+        
+        try {
+            // Обновляем URL в настройках
+            settingsManager.setExternalTorrServeUrl(newServerUrl)
+            Log.d(TAG, "Обновлен URL торрент-сервера в настройках")
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка при обновлении URL сервера", e)
+        }
+    }
+    
+    @JavascriptInterface
+    fun getCurrentServerMode(): String {
+        return settingsManager.getTorrServerMode()
+    }
+    
+    @JavascriptInterface
+    fun isFreeTorrEnabled(): Boolean {
+        return settingsManager.isFreeTorrEnabled()
+    }
+    
+    @JavascriptInterface
+    fun isAutoSwitchEnabled(): Boolean {
+        return settingsManager.isAutoSwitchServersEnabled()
+    }
+    
+    @JavascriptInterface
+    fun logMessage(message: String) {
+        Log.d(TAG, message)
     }
 }
 
@@ -542,6 +585,10 @@ fun AdBlockWebView(
                     addJavascriptInterface(adBlockerInterface, "Android")
                     addJavascriptInterface(adBlockerInterface, "NativeAdBlocker")
                     
+                    // Добавляем FreeTorr JavaScript интерфейс
+                    val freeTorrInterface = FreeTorrJSInterface(context)
+                    addJavascriptInterface(freeTorrInterface, "FreeTorr")
+                    
                     // Регистрация интерфейса для обработки вызовов из плеера
                     try {
                         // Пытаемся получить доступ к MainActivity
@@ -560,6 +607,13 @@ fun AdBlockWebView(
                     
                     // Загружаем URL
                     loadUrl(urlToLoad)
+                    
+                    // Инициализируем FreeTorr если включен
+                    val settingsManager = SettingsManager.getInstance(context)
+                    if (settingsManager.isFreeTorrEnabled() && 
+                        settingsManager.getTorrServerMode() == SettingsManager.TORR_SERVER_MODE_FREE_TORR) {
+                        initializeFreeTorr(this)
+                    }
                     
                     // Сохраняем ссылку на WebView
                 }.also { webView = it }
@@ -2583,5 +2637,47 @@ private fun injectPipSupport(webView: WebView) {
         Log.d("PipHelper", "JavaScript для поддержки Picture-in-Picture успешно внедрен")
     } catch (e: Exception) {
         Log.e("PipHelper", "Ошибка при внедрении JavaScript для поддержки Picture-in-Picture: ${e.message}")
+    }
+}
+
+/**
+ * Инициализирует FreeTorr в WebView
+ */
+private fun initializeFreeTorr(webView: WebView) {
+    val settingsManager = SettingsManager.getInstance(webView.context)
+    val torrServeManager = TorrServeManager.getInstance(webView.context)
+    
+    // Получаем JavaScript код для FreeTorr
+    val freeTorrJS = torrServeManager.getFreeTorrJavaScript()
+    
+    // Внедряем JavaScript в WebView
+    try {
+        webView.evaluateJavascript(freeTorrJS, null)
+        Log.d("FreeTorr", "JavaScript для FreeTorr успешно внедрен")
+        
+        // Инициализируем сервер в фоновом режиме
+        webView.post {
+            webView.evaluateJavascript("""
+                (function() {
+                    if (window.FreeTorr && window.FreeTorr.getRandomTorrServer) {
+                        console.log('FreeTorr: Инициализация сервера...');
+                        window.FreeTorr.getRandomTorrServer().then(function(serverUrl) {
+                            if (serverUrl) {
+                                console.log('FreeTorr: Сервер инициализирован:', serverUrl);
+                                if (window.FreeTorr && window.FreeTorr.onServerChanged) {
+                                    window.FreeTorr.onServerChanged(serverUrl);
+                                }
+                            } else {
+                                console.error('FreeTorr: Не удалось инициализировать сервер');
+                            }
+                        }).catch(function(error) {
+                            console.error('FreeTorr: Ошибка инициализации:', error);
+                        });
+                    }
+                })();
+            """.trimIndent(), null)
+        }
+    } catch (e: Exception) {
+        Log.e("FreeTorr", "Ошибка при внедрении JavaScript для FreeTorr: ${e.message}")
     }
 }

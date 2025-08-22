@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.reyohoho"
         minSdk = 24
         targetSdk = 35
-        versionCode = 340
-        versionName = "3.4"
+        versionCode = 341
+        versionName = "3.41"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

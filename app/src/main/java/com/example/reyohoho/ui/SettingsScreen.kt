@@ -2123,108 +2123,228 @@ fun TorrentsSettingsScreen(onBack: () -> Unit, onClose: () -> Unit) {
                 modifier = Modifier.padding(vertical = 4.dp)
             )
             Spacer(modifier = Modifier.height(8.dp))
+            
+            // Переключатель режима сервера
+            val serverMode = settingsManager.torrServerModeFlow.collectAsState().value
+            val freeTorrEnabled = settingsManager.freeTorrEnabledFlow.collectAsState().value
+            
+            // Выбор режима сервера
             Text(
-                text = "URL внешнего TorrServe",
+                text = "Режим торрент-сервера",
                 color = Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Medium
             )
             Spacer(modifier = Modifier.height(8.dp))
             
-            // Заменяем BasicTextField на TextField с улучшенной поддержкой для ТВ
-            OutlinedTextField(
-                value = urlInput,
-                onValueChange = {
-                    urlInput = it.removeSuffix("/")
-                    checkResult = null
-                },
-                modifier = Modifier
-                    .fillMaxWidth(),
-                textStyle = androidx.compose.ui.text.TextStyle(
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = { 
+                        settingsManager.setTorrServerMode(SettingsManager.TORR_SERVER_MODE_CUSTOM)
+                        settingsManager.setFreeTorrEnabled(false)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (serverMode == SettingsManager.TORR_SERVER_MODE_CUSTOM) 
+                            Color(0xFF4CAF50) else Color(0xFF666666)
+                    ),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Свой сервер")
+                }
+                
+                Button(
+                    onClick = { 
+                        settingsManager.setTorrServerMode(SettingsManager.TORR_SERVER_MODE_FREE_TORR)
+                        settingsManager.setFreeTorrEnabled(true)
+                        
+                        // Запускаем поиск доступных серверов
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                            try {
+                                val torrServeManager = com.example.reyohoho.ui.TorrServeManager.getInstance(context)
+                                val success = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    torrServeManager.initializeFreeTorrServer()
+                                }
+                                if (success) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "FreeTorr сервер найден и готов к работе",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Не удалось найти доступный FreeTorr сервер",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Ошибка при поиске сервера: ${e.message}",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (serverMode == SettingsManager.TORR_SERVER_MODE_FREE_TORR) 
+                            Color(0xFF4CAF50) else Color(0xFF666666)
+                    ),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("FreeTorr")
+                }
+            }
+            
+            if (serverMode == SettingsManager.TORR_SERVER_MODE_CUSTOM) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "URL вашего TorrServe",
                     color = Color.White,
-                    fontSize = 16.sp
-                ),
-                singleLine = true,
-                shape = RoundedCornerShape(8.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xFF2A2A2A),
-                    unfocusedContainerColor = Color(0xFF2A2A2A),
-                    focusedBorderColor = if (urlValid) Color(0xFF4CAF50) else Color.Gray,
-                    unfocusedBorderColor = if (urlValid) Color(0xFF4CAF50) else Color.Gray,
-                    cursorColor = Color(0xFF4CAF50),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                trailingIcon = {
-                    if (urlInput.isNotEmpty() && urlValid) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "URL валиден",
-                            tint = Color(0xFF4CAF50),
-                            modifier = Modifier.size(24.dp)
-                        )
-                    } else if (urlInput.isNotEmpty()) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "URL некорректен",
-                            tint = Color(0xFFF44336),
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                },
-                placeholder = {
-                    Text(
-                        "Например: http://192.168.1.100:8090",
-                        color = Color.Gray,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // Используем BasicTextField для лучшего ввода URL
+                BasicTextField(
+                    value = urlInput,
+                    onValueChange = { newValue ->
+                        urlInput = newValue
+                        checkResult = null
+                    },
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        color = Color.White,
                         fontSize = 16.sp
+                    ),
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            color = Color(0xFF2A2A2A),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (urlValid) Color(0xFF4CAF50) else Color.Gray,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .padding(16.dp)
+                )
+                
+                // Сохраняем URL только при нажатии кнопки проверки
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        if (urlValid) {
+                            settingsManager.setExternalTorrServeUrl(urlInput)
+                            settingsManager.setUseInternalTorrServe(false)
+                        }
+                        checking = true
+                        checkResult = null
+                        kotlinx.coroutines.GlobalScope.launch {
+                            try {
+                                val available = com.example.reyohoho.ui.TorrServeManager.getInstance(context).checkTorrServeAvailable()
+                                checking = false
+                                checkResult = if (available) "Соединение успешно" else "Нет соединения"
+                            } catch (e: Exception) {
+                                checking = false
+                                checkResult = "Ошибка: ${e.message}"
+                            }
+                        }
+                    },
+                    enabled = urlValid && !checking,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (checking) "Проверить и сохранить" else "Проверить и сохранить")
+                }
+                if (checkResult != null) {
+                    Text(
+                        text = checkResult ?: "",
+                        color = if (checkResult == "Соединение успешно") Color(0xFF4CAF50) else Color(0xFFF44336),
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(top = 8.dp)
                     )
                 }
-            )
-            
-            // Автоматическое сохранение при валидном URL
-            LaunchedEffect(urlInput, urlValid) {
-                if (urlValid) {
-                    settingsManager.setExternalTorrServeUrl(urlInput)
-                    settingsManager.setUseInternalTorrServe(false)
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = {
-                    checking = true
-                    checkResult = null
-                    kotlinx.coroutines.GlobalScope.launch {
-                        try {
-                            val available = com.example.reyohoho.ui.TorrServeManager.getInstance(context).checkTorrServeAvailable()
-                            checking = false
-                            checkResult = if (available) "Соединение успешно" else "Нет соединения"
-                        } catch (e: Exception) {
-                            checking = false
-                            checkResult = "Ошибка: ${e.message}"
-                        }
-                    }
-                },
-                enabled = urlValid && !checking,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(if (checking) "Проверка..." else "Проверить соединение")
-            }
-            if (checkResult != null) {
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = checkResult ?: "",
-                    color = if (checkResult == "Соединение успешно") Color(0xFF4CAF50) else Color(0xFFF44336),
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(top = 8.dp)
+                    text = "Пример: http://localhost:8090, http://192.168.1.50:8090",
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(vertical = 4.dp)
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Пример: http://localhost:8090, http://192.168.1.100:8090",
-                color = Color.Gray,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(vertical = 4.dp)
-            )
+            
+            if (serverMode == SettingsManager.TORR_SERVER_MODE_FREE_TORR) {
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Кнопка для ручной смены адреса
+                var isChangingServer by remember { mutableStateOf(false) }
+                
+                // Отображение текущего сервера через StateFlow
+                val currentServerUrl = settingsManager.freeTorrServerUrlFlow.collectAsState().value
+                val currentServerDisplay = if (currentServerUrl != "http://localhost:8090/") {
+                    currentServerUrl.replace("http://", "").replace(":8090", "").replace("/", "")
+                } else {
+                    "Не выбран"
+                }
+                
+                // Отображение текущего сервера
+                Text(
+                    text = "Текущий сервер: $currentServerDisplay",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Button(
+                    onClick = {
+                        isChangingServer = true
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                            try {
+                                val torrServeManager = com.example.reyohoho.ui.TorrServeManager.getInstance(context)
+                                val success = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    torrServeManager.forceSwitchServer()
+                                }
+                                if (success) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Сервер успешно изменен",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Не удалось найти доступный сервер",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Ошибка при смене сервера: ${e.message}",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            } finally {
+                                isChangingServer = false
+                            }
+                        }
+                    },
+                    enabled = !isChangingServer,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50), contentColor = Color.White),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isChangingServer) "Поиск сервера..." else "Сменить адрес")
+                }
+            }
+            
+
         }
     }
 } 
