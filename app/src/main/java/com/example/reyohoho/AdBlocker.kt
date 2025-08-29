@@ -39,6 +39,8 @@ class AdBlocker {
             "avatars.mds.yandex.net", "st.kp.yandex.net", "b-cdn.net", "reyohoho.b-cdn.net"
         )
 
+
+
         // Флаг инициализации
         @Volatile
         private var isInitialized = false
@@ -433,7 +435,8 @@ class AdBlocker {
                 "/ads/", "/ad/", "/adv/", "/advert", "/advertising/", 
                 "/banners/", "/banner/", "ad.js", "ads.js", "analytics", 
                 "tracker", "pixel.gif", "ad_", "ads_", "adserv", "adserver", 
-                "adsystem", "adtech", "adform", "popunder", "clickunder"
+                "adsystem", "adtech", "adform", "popunder", "clickunder",
+                "vast.xml", "ad-rotator", "stats?viewId"
             )
             
             for (indicator in adIndicators) {

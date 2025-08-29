@@ -77,6 +77,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -90,6 +91,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.border
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.ui.text.input.KeyboardType
 
 /**
  * Экран настроек приложения
@@ -776,11 +780,12 @@ fun AppSettingsScreen(
         Spacer(modifier = Modifier.height(32.dp))
         
         // Переключатели настроек
-        SettingSwitch(
+        TopSpacingSettingSwitch(
             title = "Убрать отступ сверху", 
             description = "Уменьшает пустое пространство вверху страницы",
             checked = removeTopSpacing.value,
-            onCheckedChange = { settingsManager.toggleTopSpacing() }
+            onCheckedChange = { settingsManager.toggleTopSpacing() },
+            settingsManager = settingsManager
         )
         
         SettingSwitch(
@@ -908,12 +913,13 @@ fun AppearanceSettingsScreen(
                 }
             }
             Spacer(modifier = Modifier.height(32.dp))
-            // Настройка отступа
-            SettingSwitch(
+            // Настройка отступа с кнопкой настройки размера
+            TopSpacingSettingSwitch(
                 title = "Убрать отступ сверху",
                 description = "Уменьшает пустое пространство вверху страницы",
                 checked = removeTopSpacing.value,
-                onCheckedChange = { settingsManager.toggleTopSpacing() }
+                onCheckedChange = { settingsManager.toggleTopSpacing() },
+                settingsManager = settingsManager
             )
             // Настройка полноэкранного режима
             SettingSwitch(
@@ -1122,6 +1128,7 @@ fun AboutScreen(
     val savedDownloadedId = settingsManager.getDownloadedUpdateId()
     val ignoredUpdateVersion = settingsManager.getIgnoredUpdateVersion()
     var wasChecked by remember { mutableStateOf(false) }
+    var showNotificationDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -1363,19 +1370,46 @@ fun AboutScreen(
                 Text("У вас последняя версия", color = Color(0xFF4CAF50), fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
             }
             Spacer(modifier = Modifier.height(16.dp))
-            // Параметр 'Уведомлять о новой версии' (Row с Switch)
+            // Параметр 'Уведомлять о новой версии' с кнопкой настройки
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp),
+                    .padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-            Text(
-                    text = "Уведомлять о новой версии",
-                color = Color.White,
-                    fontSize = 16.sp,
-                    modifier = Modifier.weight(1f)
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Уведомлять о новой версии",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "Получать уведомления о доступных обновлениях",
+                        color = Color.Gray,
+                        fontSize = 14.sp
+                    )
+                }
+                
+                // Кнопка настройки уведомлений (показываем только если уведомления включены)
+                if (notifyOnUpdate) {
+                    IconButton(
+                        onClick = { showNotificationDialog = true },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(Color(0xFF2A2A2A), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Настроить уведомления об обновлениях",
+                            tint = Color(0xFF4CAF50),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+                
                 Switch(
                     checked = notifyOnUpdate,
                     onCheckedChange = onNotifyOnUpdateChange,
@@ -1386,7 +1420,15 @@ fun AboutScreen(
                         uncheckedTrackColor = Color(0x33FFFFFF)
                     )
                 )
-        }
+            }
+            
+            // Диалог настройки уведомлений об обновлениях
+            if (showNotificationDialog) {
+                UpdateNotificationDialog(
+                    settingsManager = settingsManager,
+                    onDismiss = { showNotificationDialog = false }
+                )
+            }
         }
     }
     // SnackbarHost для баннера
@@ -2347,4 +2389,389 @@ fun TorrentsSettingsScreen(onBack: () -> Unit, onClose: () -> Unit) {
 
         }
     }
-} 
+}
+
+@Composable
+fun TopSpacingSettingSwitch(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    settingsManager: SettingsManager
+) {
+    var showSpacingDialog by remember { mutableStateOf(false) }
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = description,
+                color = Color.Gray,
+                fontSize = 14.sp
+            )
+        }
+        
+        // Кнопка настройки размера отступа (показываем только если отступ не убран)
+        if (!checked) {
+            IconButton(
+                onClick = { showSpacingDialog = true },
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(Color(0xFF2A2A2A), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Настроить размер отступа",
+                    tint = Color(0xFF4CAF50),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(12.dp))
+        }
+        
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color(0xFF4CAF50),
+                checkedTrackColor = Color(0x884CAF50),
+                uncheckedThumbColor = Color.Gray,
+                uncheckedTrackColor = Color(0x33FFFFFF)
+            )
+        )
+    }
+    
+    // Диалог настройки размера отступа
+    if (showSpacingDialog) {
+        TopSpacingDialog(
+            settingsManager = settingsManager,
+            onDismiss = { showSpacingDialog = false }
+        )
+    }
+}
+
+@Composable
+fun TopSpacingDialog(
+    settingsManager: SettingsManager,
+    onDismiss: () -> Unit
+) {
+    val topSpacingSize = settingsManager.topSpacingSizeFlow.collectAsState()
+    var inputValue by remember { mutableStateOf(topSpacingSize.value.toString()) }
+    var isError by remember { mutableStateOf(false) }
+    
+    // Обновляем inputValue при изменении topSpacingSize извне
+    LaunchedEffect(topSpacingSize.value) {
+        inputValue = topSpacingSize.value.toString()
+        isError = false
+    }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Настройка отступа сверху",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    text = "Введите размер отступа в пикселях (0-100):",
+                    color = Color.Gray,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                
+                OutlinedTextField(
+                    value = inputValue,
+                    onValueChange = { newValue ->
+                        inputValue = newValue
+                        isError = false
+                        
+                        val number = newValue.toIntOrNull()
+                        if (number != null && number in 0..100) {
+                            settingsManager.setTopSpacingSize(number)
+                        } else if (newValue.isNotEmpty()) {
+                            isError = true
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = if (isError) Color(0xFFF44336) else Color(0xFF4CAF50),
+                        unfocusedBorderColor = if (isError) Color(0xFFF44336) else Color(0xFF2A2A2A),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        cursorColor = Color(0xFF4CAF50),
+                        focusedContainerColor = Color(0xFF1A1A1A),
+                        unfocusedContainerColor = Color(0xFF1A1A1A)
+                    ),
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = 16.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    placeholder = {
+                        Text(
+                            text = "24",
+                            color = Color.Gray,
+                            fontSize = 16.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                )
+                
+                if (isError) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Введите число от 0 до 100",
+                        color = Color(0xFFF44336),
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF4CAF50))
+            ) {
+                Text("ОК")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = { 
+                    settingsManager.setTopSpacingSize(24)
+                    inputValue = "24"
+                    isError = false
+                },
+                colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFF44336))
+            ) {
+                Text("Сбросить")
+            }
+        },
+        containerColor = Color(0xFF1E1E1E),
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+
+
+
+@Composable
+fun UpdateNotificationDialog(
+    settingsManager: SettingsManager,
+    onDismiss: () -> Unit
+) {
+    val updateNotifyMultiple = settingsManager.updateNotifyMultipleFlow.collectAsState()
+    val updateNotifyInterval = settingsManager.updateNotifyIntervalFlow.collectAsState()
+    var inputValue by remember { mutableStateOf(updateNotifyInterval.value.toString()) }
+    var isError by remember { mutableStateOf(false) }
+    
+    // Функция для правильного склонения слова "час"
+    fun getHoursText(hours: Int): String {
+        return when {
+            hours % 10 == 1 && hours % 100 != 11 -> "час"
+            hours % 10 in 2..4 && hours % 100 !in 12..14 -> "часа"
+            else -> "часов"
+        }
+    }
+    
+    // Обновляем inputValue при изменении updateNotifyInterval извне
+    LaunchedEffect(updateNotifyInterval.value) {
+        inputValue = updateNotifyInterval.value.toString()
+        isError = false
+    }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        text = {
+            Column {
+                // Переключатель множественных уведомлений
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Множественные уведомления",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "Уведомлять несколько раз о том же обновлении",
+                            color = Color.Gray,
+                            fontSize = 14.sp
+                        )
+                    }
+                    
+                    Switch(
+                        checked = updateNotifyMultiple.value,
+                        onCheckedChange = { settingsManager.setUpdateNotifyMultiple(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFF4CAF50),
+                            checkedTrackColor = Color(0x884CAF50),
+                            uncheckedThumbColor = Color.Gray,
+                            uncheckedTrackColor = Color(0x33FFFFFF)
+                        )
+                    )
+                }
+                
+                // Настройка интервала (показываем только если множественные уведомления включены)
+                if (updateNotifyMultiple.value) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text(
+                        text = "Интервал между уведомлениями:",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Поле ввода интервала
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Интервал:",
+                            color = Color.Gray,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        
+                        OutlinedTextField(
+                            value = inputValue,
+                            onValueChange = { newValue ->
+                                inputValue = newValue
+                                isError = false
+                                
+                                val number = newValue.toIntOrNull()
+                                if (number != null && number in 1..168) {
+                                    settingsManager.setUpdateNotifyInterval(number)
+                                } else if (newValue.isNotEmpty()) {
+                                    isError = true
+                                }
+                            },
+                            modifier = Modifier.width(80.dp),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = if (isError) Color(0xFFF44336) else Color(0xFF4CAF50),
+                                unfocusedBorderColor = if (isError) Color(0xFFF44336) else Color(0xFF3A3A3A),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                cursorColor = Color(0xFF4CAF50),
+                                focusedContainerColor = Color(0xFF1A1A1A),
+                                unfocusedContainerColor = Color(0xFF1A1A1A)
+                            ),
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 14.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                fontWeight = FontWeight.Medium
+                            ),
+                            placeholder = {
+                                Text(
+                                    text = "24",
+                                    color = Color.Gray,
+                                    fontSize = 14.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            },
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        
+                        Spacer(modifier = Modifier.width(8.dp))
+                        
+                        Text(
+                            text = getHoursText(updateNotifyInterval.value),
+                            color = Color.Gray,
+                            fontSize = 14.sp
+                        )
+                        
+                        Spacer(modifier = Modifier.weight(1f))
+                        
+                        // Кнопка сброса
+                        IconButton(
+                            onClick = { 
+                                settingsManager.setUpdateNotifyInterval(24)
+                                inputValue = "24"
+                                isError = false
+                            },
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(Color(0xFF4CAF50), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Сбросить",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                    
+                    // Сообщение об ошибке
+                    if (isError) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Введите число от 1 до 168",
+                            color = Color(0xFFF44336),
+                            fontSize = 12.sp
+                        )
+                    }
+                    
+                    // Информация о диапазоне
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Диапазон: от 1 часа до 7 дней (168 часов)",
+                        color = Color.Gray,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF4CAF50))
+            ) {
+                Text("ОК")
+            }
+        },
+        containerColor = Color(0xFF1E1E1E),
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+
+private fun getHoursText(hours: Int): String {
+    return when {
+        hours == 1 -> "час"
+        hours in 2..4 -> "часа"
+        hours in 5..20 -> "часов"
+        hours % 10 == 1 -> "час"
+        hours % 10 in 2..4 -> "часа"
+        else -> "часов"
+    }
+}

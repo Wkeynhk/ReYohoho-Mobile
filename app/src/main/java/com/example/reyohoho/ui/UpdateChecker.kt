@@ -184,22 +184,42 @@ class UpdateCheckWorker(appContext: Context, workerParams: WorkerParameters) : C
         if (!notifyOnUpdate) {
             return Result.success()
         }
+        
         val savedDownloadedVersion = settingsManager.getDownloadedUpdateVersion()
         val savedDownloadedId = settingsManager.getDownloadedUpdateId()
-        var latestVersion: String? = null
         val ignoredUpdateVersion = settingsManager.getIgnoredUpdateVersion()
+        val updateNotifyMultiple = settingsManager.isUpdateNotifyMultipleEnabled()
+        val updateNotifyInterval = settingsManager.getUpdateNotifyInterval()
+        
         try {
             if (savedDownloadedVersion != null && savedDownloadedId > 0) {
                 return Result.success()
             }
-            if (ignoredUpdateVersion != null && latestVersion == ignoredUpdateVersion) {
-                return Result.success()
-            }
+            
             val result = UpdateChecker.checkForUpdate(applicationContext)
-            latestVersion = result.latestVersion
+            val latestVersion = result.latestVersion
+            
             if (result.isUpdateAvailable) {
                 if (ignoredUpdateVersion == null || latestVersion != ignoredUpdateVersion) {
-                    UpdateChecker.sendUpdateNotification(applicationContext, result.latestVersion)
+                    // Проверяем, нужно ли отправлять уведомление
+                    val shouldNotify = if (updateNotifyMultiple) {
+                        // Для множественных уведомлений проверяем время последнего уведомления
+                        val lastNotificationTime = settingsManager.getLastUpdateNotificationTime(latestVersion)
+                        val currentTime = System.currentTimeMillis()
+                        val intervalMs = updateNotifyInterval * 60 * 60 * 1000L // конвертируем часы в миллисекунды
+                        
+                        lastNotificationTime == 0L || (currentTime - lastNotificationTime) >= intervalMs
+                    } else {
+                        // Для одиночных уведомлений проверяем, не было ли уже уведомления
+                        val lastNotificationTime = settingsManager.getLastUpdateNotificationTime(latestVersion)
+                        lastNotificationTime == 0L
+                    }
+                    
+                    if (shouldNotify) {
+                        UpdateChecker.sendUpdateNotification(applicationContext, result.latestVersion)
+                        // Сохраняем время последнего уведомления
+                        settingsManager.setLastUpdateNotificationTime(latestVersion, System.currentTimeMillis())
+                    }
                 }
             }
             return Result.success()

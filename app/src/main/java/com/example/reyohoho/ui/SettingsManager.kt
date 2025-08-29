@@ -14,12 +14,16 @@ class SettingsManager(context: Context) {
     companion object {
         private const val PREFS_NAME = "reyohoho_settings"
         private const val KEY_REMOVE_TOP_SPACING = "remove_top_spacing"
+        private const val KEY_TOP_SPACING_SIZE = "top_spacing_size"
         private const val KEY_FULLSCREEN_MODE = "fullscreen_mode"
         private const val KEY_DEVICE_TYPE = "device_type"
         private const val KEY_SITE_MIRROR = "site_mirror"
         private const val KEY_PULL_TO_REFRESH = "pull_to_refresh"
         private const val KEY_DISABLE_ZOOM = "disable_zoom"
         private const val KEY_NOTIFY_ON_UPDATE = "notify_on_update"
+        private const val KEY_UPDATE_NOTIFY_MULTIPLE = "update_notify_multiple"
+        private const val KEY_UPDATE_NOTIFY_INTERVAL = "update_notify_interval"
+        private const val KEY_LAST_UPDATE_NOTIFICATION_TIME = "last_update_notification_time"
         private const val KEY_DOWNLOADED_UPDATE_VERSION = "downloaded_update_version"
         private const val KEY_DOWNLOADED_UPDATE_ID = "downloaded_update_id"
         private const val KEY_IGNORED_UPDATE_VERSION = "ignored_update_version"
@@ -76,6 +80,10 @@ class SettingsManager(context: Context) {
     private val _removeTopSpacingFlow = MutableStateFlow(isTopSpacingRemoved())
     val removeTopSpacingFlow: StateFlow<Boolean> = _removeTopSpacingFlow.asStateFlow()
     
+    // StateFlow для отслеживания размера отступа сверху
+    private val _topSpacingSizeFlow = MutableStateFlow(getTopSpacingSize())
+    val topSpacingSizeFlow: StateFlow<Int> = _topSpacingSizeFlow.asStateFlow()
+    
     // StateFlow для отслеживания изменений настройки полноэкранного режима
     private val _fullscreenModeFlow = MutableStateFlow(isFullscreenModeEnabled())
     val fullscreenModeFlow: StateFlow<Boolean> = _fullscreenModeFlow.asStateFlow()
@@ -100,6 +108,13 @@ class SettingsManager(context: Context) {
     val showRemainingTimeFlow = MutableStateFlow(isShowRemainingTimeEnabled())
     val progressDisplayModeFlow = MutableStateFlow(getProgressDisplayMode())
     val showDownloadConfirmationFlow = MutableStateFlow(isShowDownloadConfirmationEnabled())
+    
+    // StateFlow для настроек уведомлений об обновлениях
+    private val _updateNotifyMultipleFlow = MutableStateFlow(isUpdateNotifyMultipleEnabled())
+    val updateNotifyMultipleFlow: StateFlow<Boolean> = _updateNotifyMultipleFlow.asStateFlow()
+    
+    private val _updateNotifyIntervalFlow = MutableStateFlow(getUpdateNotifyInterval())
+    val updateNotifyIntervalFlow: StateFlow<Int> = _updateNotifyIntervalFlow.asStateFlow()
     
     // StateFlow для отслеживания настройки загрузки на главную страницу
     private val _loadOnMainPageFlow = MutableStateFlow(isLoadOnMainPageEnabled())
@@ -309,6 +324,21 @@ class SettingsManager(context: Context) {
         setRemoveTopSpacing(newValue)
         return newValue
     }
+    
+    /**
+     * Возвращает размер отступа сверху в пикселях
+     */
+    fun getTopSpacingSize(): Int {
+        return prefs.getInt(KEY_TOP_SPACING_SIZE, 24)
+    }
+    
+    /**
+     * Устанавливает размер отступа сверху в пикселях
+     */
+    fun setTopSpacingSize(size: Int) {
+        prefs.edit().putInt(KEY_TOP_SPACING_SIZE, size).apply()
+        _topSpacingSizeFlow.value = size
+    }
 
     /**
      * Возвращает статус настройки полноэкранного режима
@@ -428,6 +458,50 @@ class SettingsManager(context: Context) {
 
     fun setNotifyOnUpdate(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_NOTIFY_ON_UPDATE, enabled).apply()
+    }
+    
+    /**
+     * Возвращает статус настройки множественных уведомлений об обновлениях
+     */
+    fun isUpdateNotifyMultipleEnabled(): Boolean {
+        return prefs.getBoolean(KEY_UPDATE_NOTIFY_MULTIPLE, false)
+    }
+    
+    /**
+     * Устанавливает статус настройки множественных уведомлений об обновлениях
+     */
+    fun setUpdateNotifyMultiple(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_UPDATE_NOTIFY_MULTIPLE, enabled).apply()
+        _updateNotifyMultipleFlow.value = enabled
+    }
+    
+    /**
+     * Возвращает интервал между уведомлениями об обновлениях в часах
+     */
+    fun getUpdateNotifyInterval(): Int {
+        return prefs.getInt(KEY_UPDATE_NOTIFY_INTERVAL, 24)
+    }
+    
+    /**
+     * Устанавливает интервал между уведомлениями об обновлениях в часах
+     */
+    fun setUpdateNotifyInterval(hours: Int) {
+        prefs.edit().putInt(KEY_UPDATE_NOTIFY_INTERVAL, hours).apply()
+        _updateNotifyIntervalFlow.value = hours
+    }
+    
+    /**
+     * Возвращает время последнего уведомления об обновлении для конкретной версии
+     */
+    fun getLastUpdateNotificationTime(version: String): Long {
+        return prefs.getLong("${KEY_LAST_UPDATE_NOTIFICATION_TIME}_$version", 0L)
+    }
+    
+    /**
+     * Устанавливает время последнего уведомления об обновлении для конкретной версии
+     */
+    fun setLastUpdateNotificationTime(version: String, time: Long) {
+        prefs.edit().putLong("${KEY_LAST_UPDATE_NOTIFICATION_TIME}_$version", time).apply()
     }
 
     fun setDownloadedUpdate(version: String, downloadId: Long) {

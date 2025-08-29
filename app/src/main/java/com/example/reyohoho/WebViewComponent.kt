@@ -440,7 +440,8 @@ class CustomWebViewClient(
         // Применяем настройки отступа
         val removeSpacing = settingsManager?.isTopSpacingRemoved() ?: false
         if (!removeSpacing) {
-            injectHeaderSpacing(view)
+            val spacingSize = settingsManager?.getTopSpacingSize() ?: 24
+            injectHeaderSpacing(view, spacingSize)
         } else {
             removeHeaderSpacing(view)
         }
@@ -624,7 +625,8 @@ fun AdBlockWebView(
                 if (currentRemoveSpacing) {
                     removeHeaderSpacing(view)
                 } else {
-                    injectHeaderSpacing(view)
+                    val spacingSize = settingsManager?.getTopSpacingSize() ?: 24
+                    injectHeaderSpacing(view, spacingSize)
                 }
                 
                 // Обновляем настройки зума
@@ -1861,7 +1863,7 @@ private fun injectRussianAdBlocker(webView: WebView) {
 /**
  * Добавляет отступ для контента страницы и черную полосу сверху
  */
-private fun injectHeaderSpacing(webView: WebView) {
+private fun injectHeaderSpacing(webView: WebView, spacingSize: Int = 24) {
     val headerSpacingJs = """
         (function() {
             // Создаем стиль для отступа контента
@@ -1874,7 +1876,7 @@ private fun injectHeaderSpacing(webView: WebView) {
                     top: 0;
                     left: 0;
                     right: 0;
-                    height: 24px;
+                    height: ${spacingSize}px;
                     background-color: #000000;
                     z-index: 10000;
                     pointer-events: none;
@@ -1894,7 +1896,7 @@ private fun injectHeaderSpacing(webView: WebView) {
                 .main-header,
                 .top-menu,
                 .navigation {
-                    margin-top: 24px !important;
+                    margin-top: ${spacingSize}px !important;
                 }
                 
                 /* Для фиксированных элементов */
@@ -1907,14 +1909,14 @@ private fun injectHeaderSpacing(webView: WebView) {
                 [style*="position:fixed"],
                 .fixed-top,
                 .sticky-top {
-                    top: 24px !important;
+                    top: ${spacingSize}px !important;
                 }
             `;
             
             // Добавляем стиль в head
             document.head.appendChild(style);
             
-            console.log('[HeaderSpacing] Добавлена черная полоса сверху и отступ для контента');
+            console.log('[HeaderSpacing] Добавлена черная полоса сверху и отступ для контента: ${spacingSize}px');
         })();
     """.trimIndent()
     
